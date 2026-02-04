@@ -1,0 +1,29 @@
+# Build files
+.vscode/**
+.vscode-test/**
+src/**
+src/test/**
+tsconfig.json
+.eslintrc.json
+
+# Development files
+.gitignore
+.git
+.DS_Store
+*.md
+!README.md
+!CHANGELOG.md
+
+# Dependencies
+node_modules
+.npmrc
+
+# Test and coverage
+coverage/
+*.test.ts
+test/
+out/test/**
+
+# Misc
+*.vsix
+.editorconfig

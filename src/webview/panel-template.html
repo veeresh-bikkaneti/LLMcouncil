@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM Council</title>
+  <style>
+    body {
+      font-family: var(--vscode-font-family);
+      color: var(--vscode-foreground);
+      background-color: var(--vscode-editor-background);
+      padding: 20px;
+      line-height: 1.6;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    h1 { 
+      color: var(--vscode-textLink-foreground);
+      border-bottom: 2px solid var(--vscode-textLink-foreground);
+      padding-bottom: 10px;
+    }
+    .agent-card {
+      background: var(--vscode-editor-inactiveSelectionBackground);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 8px;
+      padding: 20px;
+      margin: 15px 0;
+    }
+    .agent-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+    }
+    .agent-title {
+      font-size: 1.2em;
+      font-weight: bold;
+      color: var(--vscode-textLink-foreground);
+    }
+    .status {
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 0.85em;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+    .status-thinking {
+      background: var(--vscode-inputValidation-warningBackground);
+      color: var(--vscode-inputValidation-warningForeground);
+    }
+    .status-done {
+      background: var(--vscode-testing-iconPassed);
+      color: var(--vscode-editor-background);
+    }
+    .status-error {
+      background: var(--vscode-inputValidation-errorBackground);
+      color: var(--vscode-inputValidation-errorForeground);
+    }
+    .consensus {
+      background: var(--vscode-textBlockQuote-background);
+      border-left: 4px solid var(--vscode-textLink-foreground);
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 4px;
+    }
+    .spinner {
+      border: 3px solid var(--vscode-panel-border);
+      border-top: 3px solid var(--vscode-textLink-foreground);
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      animation: spin 1s linear infinite;
+      display: inline-block;
+      margin-right: 10px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    button {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9em;
+    }
+    button:hover {
+      background: var(--vscode-button-hoverBackground);
+    }
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--vscode-descriptionForeground);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🤖 LLM Council Analysis</h1>
+    <div id="content">
+      <div class="empty-state">
+        <p>Select text in your editor and use <strong>Ctrl+Shift+L</strong> to start analysis</p>
+        <p style="margin-top: 10px; font-size: 0.9em;">or run <code>LLMCouncil: Analyze Selection</code> from the Command Palette</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const vscode = acquireVsCodeApi();
+    
+    window.addEventListener('message', event => {
+      const message = event.data;
+      
+      switch (message.command) {
+        case 'updateAgent':
+          updateAgentStatus(message.agent, message.status);
+          break;
+        case 'updateResults':
+          displayResults(message.report);
+          break;
+        case 'showError':
+          showError(message.error);
+          break;
+      }
+    });
+
+    function updateAgentStatus(agent, status) {
+      const content = document.getElementById('content');
+      let agentCard = document.getElementById('agent-' + agent);
+      
+      if (!agentCard) {
+        if (content.querySelector('.empty-state')) {
+          content.innerHTML = '';
+        }
+        
+        agentCard = document.createElement('div');
+        agentCard.id = 'agent-' + agent;
+        agentCard.className = 'agent-card';
+        agentCard.innerHTML = `
+          <div class="agent-header">
+            <div class="agent-title">\${agent}</div>
+            <div class="status status-thinking" id="status-\${agent}">
+              <span class="spinner"></span> Thinking
+            </div>
+          </div>
+          <div id="analysis-\${agent}" style="white-space: pre-wrap;"></div>
+        `;
+        content.appendChild(agentCard);
+      }
+      
+      const statusEl = document.getElementById('status-' + agent);
+      statusEl.className = 'status status-' + status;
+      statusEl.textContent = status.toUpperCase();
+    }
+
+    function displayResults(report) {
+      const content = document.getElementById('content');
+      
+      // Update agent analyses
+      report.agentOutputs.forEach(agent => {
+        const analysisEl = document.getElementById('analysis-' + agent.role);
+        if (analysisEl) {
+          analysisEl.textContent = agent.analysis;
+        }
+      });
+      
+      // Add consensus
+      const consensusDiv = document.createElement('div');
+      consensusDiv.className = 'consensus';
+      consensusDiv.innerHTML = `
+        <h2>📋 Final Consensus</h2>
+        <p><strong>Processing Time:</strong> \${(report.processingTime / 1000).toFixed(1)}s</p>
+        <p><strong>Consensus Rate:</strong> \${(report.consensusRate * 100).toFixed(0)}%</p>
+        <hr>
+        <div style="white-space: pre-wrap; margin-top: 15px;">\${report.comprehensiveAnswer}</div>
+        <button onclick="exportReport()" style="margin-top: 15px;">Export to Markdown</button>
+      `;
+      content.appendChild(consensusDiv);
+    }
+
+    function showError(error) {
+      const content = document.getElementById('content');
+      content.innerHTML = `
+        <div class="agent-card" style="border-color: var(--vscode-inputValidation-errorBorder);">
+          <h3 style="color: var(--vscode-inputValidation-errorForeground);">❌ Analysis Failed</h3>
+          <p>\${error}</p>
+        </div>
+      `;
+    }
+
+    function exportReport() {
+      vscode.postMessage({
+        command: 'export',
+        data: {}
+      });
+    }
+  </script>
+</body>
+</html>
