@@ -1,0 +1,5 @@
+{
+  "name": "LLMCouncil: AI Assistant Suite",
+  "description": "An AI-powered suite featuring two modes. 'Triage Assistant' uses a 'Council of Agents' to analyze multimodal support tickets. 'Image Studio' allows users to edit images using text prompts with Gemini.",
+  "requestFramePermissions": []
+}
