@@ -1,0 +1,46 @@
+{
+  "name": "llmcouncil-server",
+  "version": "1.0.0",
+  "description": "Backend for LLMCouncil AI Assistant",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "nodemon src/index.ts",
+    "build": "tsc",
+    "test": "jest",
+    "migrate:init": "psql -d llmcouncil -f src/db/schema.sql"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "pg": "^8.11.3",
+    "jsonwebtoken": "^9.0.2",
+    "bcrypt": "^5.1.1",
+    "express-validator": "*",
+    "multer": "^1.4.5-lts.1",
+    "express-rate-limit": "*",
+    "uuid": "^9.0.1",
+    "@google/generative-ai": "*",
+    "openai": "*",
+    "@anthropic-ai/sdk": "*",
+    "winston": "^3.11.0",
+    "helmet": "^7.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "@types/express": "*",
+    "@types/node": "*",
+    "@types/pg": "*",
+    "@types/cors": "*",
+    "@types/jsonwebtoken": "*",
+    "@types/bcrypt": "*",
+    "@types/multer": "*",
+    "@types/uuid": "*",
+    "@types/jest": "*",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.1",
+    "ts-node": "^10.9.2",
+    "nodemon": "^3.0.2"
+  }
+}

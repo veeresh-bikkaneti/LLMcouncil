@@ -1,0 +1,89 @@
+# LLMCouncil: Project Requirements & Proposal
+
+## 1. Executive Summary
+**Project Name:** LLMCouncil
+**Concept:** A "Council of AI Agents" where multiple specialized LLMs (multimodal) analyze a user request independently, and a "Chairperson" agent synthesizes their findings to produce a single, high-quality, verified result.
+**Timeline:** 30 Days (Production Ready)
+
+---
+
+## 2. Selected Application Concept
+**Title:** The "Omni-Support Triage Council"
+**Domain:** Customer Service / Technical Support
+
+### 2.1 Problem Statement
+Modern support teams are overwhelmed by high volumes of tickets that often contain multimodal data (text descriptions, screenshots of errors, screen recordings, logs). Human triage is slow, inconsistent, and error-prone. Existing chatbots often fail to understand context from images or nuanced text.
+
+### 2.2 Proposed Solution
+A centralized dashboard where support tickets (or user queries) are fed to a council of 3 specialized Agents.
+*   **Agent A (The Visual Analyst - e.g., GPT-4o Vision):** Analyzes screenshots/images to identify UI elements, error codes, and visual bugs.
+*   **Agent B (The Technical Librarian - e.g., Claude 3.5 Sonnet):** Searches documentation, checking logs, and correlating text descriptions with known issues.
+*   **Agent C (The Empathy Analyst - e.g., Gemini 1.5 Pro):** Analyzes user sentiment, tone, and urgency to determine priority.
+*   **The Chairperson (Leader Agent):** Reviews the outputs of A, B, and C. It resolves conflicts (e.g., if A sees a bug but B says it's expected behavior), assigns a final Priority Score (1-10), and drafts a suggested response or internal note.
+
+### 2.3 Reasoning for Selection
+*   **Feasibility:** High. APIs for Vision and large context windows are mature.
+*   **Impact:** Immediate ROI for any SaaS business.
+*   **Multimal:** Perfectly utilizes text (logs/chat) and vision (screenshots).
+*   **30-Day Fit:** The core logic is prompt engineering and orchestration; the UI is a standard dashboard. No complex physical hardware or regulatory hurdles (like healthcare).
+
+---
+
+## 3. Functional Requirements
+
+### 3.1 Core Features
+1.  **Council Orchestration Engine**
+    *   Parallel execution of 3 Council Member agents.
+    *   Aggregation phase for the Chairperson agent.
+    *   Prompt templating for disparate models (OpenAI, Anthropic, Google).
+2.  **User Interface (React SPA)**
+    *   **Ticket Input:** Form to accept text, upload images/logs.
+    *   **Council View:** Visual representation of the agents "thinking" and their individual outputs.
+    *   **Consensus Dashboard:** The final synthesized report and rating.
+3.  **Authentication**
+    *   User-provided API Keys (BYOK - Bring Your Own Key model) for privacy and cost management.
+    *   Simple login to save preferences/history.
+4.  **History & Analytics**
+    *   Log of all past council sessions.
+    *   Analytics on "Consensus Rate" (how often agents agreed).
+    *   Cost estimator per token usage.
+
+### 3.2 Agent Roles & Personas
+*   **Role 1:** Vision Analysis (Image/Video inputs).
+*   **Role 2:** Text/Context Analysis (Text inputs).
+*   **Role 3:** Policy/Safety/Sentiment (Text inputs).
+*   **Role 4 (Leader):** Synthesis & Final Verdict.
+
+---
+
+## 4. Technical Architecture
+
+### 4.1 Stack
+*   **Frontend:** React (Vite), Tailwind CSS (for premium aesthetics), Framer Motion (animations).
+*   **Backend:** Node.js (Express) or Next.js API Routes.
+*   **Database:** PostgreSQL (via Docker/Supabase) for history and user settings.
+*   **AI Integration:** LangChain or Vercel AI SDK to manage multi-provider chains.
+
+### 4.2 Data Flow
+1.  User submits Query + Attachments.
+2.  Backend uploads media (temp storage) and constructs payloads.
+3.  Requests sent in parallel to:
+    *   `POST /analyze/vision` (GPT-4o)
+    *   `POST /analyze/text` (Claude)
+    *   `POST /analyze/sentiment` (Gemini)
+4.  Responses collected.
+5.  Final payload sent to `POST /synthesize/leader`.
+6.  Result streamed back to Frontend.
+
+---
+
+## 5. Non-Functional Requirements
+*   **Latency:** Total processing time < 15 seconds.
+*   **Reliability:** graceful degradation if one provider is down.
+*   **Security:** API keys stored encrypted (AES-256) or only in browser session storage.
+
+## 6. 30-Day Implementation Plan (High Level)
+*   **Week 1:** Setup Repo, Auth, basic "Hello World" Multi-LLM call.
+*   **Week 2:** Build the Agent Personas and Prompt Engineering (The "Council" Logic).
+*   **Week 3:** Frontend Polish - "Premium Design", visualizations of agents working.
+*   **Week 4:** History, Analytics, Bug fixes, and Dockerization.

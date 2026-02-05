@@ -1,8 +1,15 @@
+<<<<<<< HEAD
+=======
+# Agent/AI files
+.agent/*
+
+>>>>>>> 66301ef6f0a063b18290d843062401a38e9e8990
 # Dependencies
 node_modules/
 package-lock.json
 
 # Build outputs
+<<<<<<< HEAD
 out/
 dist/
 
@@ -15,6 +22,23 @@ coverage/
 
 # IDE
 .vscode/
+=======
+dist/
+out/
+build/
+*.vsix
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+>>>>>>> 66301ef6f0a063b18290d843062401a38e9e8990
 .idea/
 *.swp
 *.swo
@@ -25,6 +49,29 @@ coverage/
 Thumbs.db
 *.log
 
+<<<<<<< HEAD
 # Temporary files
 *.tmp
 .cache/
+=======
+# Test coverage
+coverage/
+.nyc_output/
+
+# Temporary files
+*.tmp
+.cache/
+
+# Chrome extension specific
+*.crx
+*.pem
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+>>>>>>> 66301ef6f0a063b18290d843062401a38e9e8990

@@ -1,0 +1,113 @@
+{
+    "name": "llmcouncil-vscode",
+    "displayName": "LLM Council - Multi-Agent AI",
+    "description": "Multi-agent AI analysis using parallel LLM execution",
+    "version": "0.1.0",
+    "publisher": "RUNTechnologyConsultingServicesLLC",
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "categories": [
+        "AI",
+        "Machine Learning",
+        "Other"
+    ],
+    "keywords": [
+        "ai",
+        "llm",
+        "copilot",
+        "analysis",
+        "multi-agent"
+    ],
+    "main": "./out/extension.js",
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "contributes": {
+        "commands": [
+            {
+                "command": "llmcouncil.analyzeSelection",
+                "title": "LLMCouncil: Analyze Selection",
+                "icon": "$(group-by-ref-type)"
+            },
+            {
+                "command": "llmcouncil.analyzeClipboard",
+                "title": "LLMCouncil: Analyze from Clipboard"
+            },
+            {
+                "command": "llmcouncil.openPanel",
+                "title": "LLMCouncil: Open Council Panel",
+                "icon": "$(panel-right)"
+            }
+        ],
+        "keybindings": [
+            {
+                "command": "llmcouncil.analyzeSelection",
+                "key": "ctrl+shift+l",
+                "mac": "cmd+shift+l",
+                "when": "editorHasSelection"
+            }
+        ],
+        "menus": {
+            "editor/context": [
+                {
+                    "command": "llmcouncil.analyzeSelection",
+                    "when": "editorHasSelection",
+                    "group": "llmcouncil@1"
+                }
+            ]
+        },
+        "configuration": {
+            "title": "LLM Council",
+            "properties": {
+                "llmcouncil.preferredModel": {
+                    "type": "string",
+                    "default": "auto",
+                    "enum": [
+                        "auto",
+                        "gpt-4",
+                        "claude",
+                        "gemini"
+                    ],
+                    "description": "Preferred language model to use"
+                },
+                "llmcouncil.enableParallelExecution": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable parallel agent execution for faster results"
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "pretest": "npm run compile",
+        "test": "node ./out/test/runTest.js",
+        "test:unit": "mocha --require ts-node/register src/test/suite/**/*.test.ts",
+        "lint": "eslint src --ext ts",
+        "package": "vsce package"
+    },
+    "devDependencies": {
+        "@types/glob": "^8.1.0",
+        "@types/mocha": "^10.0.6",
+        "@types/node": "^20.10.0",
+        "@types/sinon": "^17.0.3",
+        "@types/vscode": "^1.85.0",
+        "@typescript-eslint/eslint-plugin": "^6.15.0",
+        "@typescript-eslint/parser": "^6.15.0",
+        "@vscode/test-electron": "^2.3.8",
+        "@vscode/vsce": "^2.22.0",
+        "eslint": "^8.56.0",
+        "glob": "^10.3.10",
+        "mocha": "^10.2.0",
+        "sinon": "^17.0.1",
+        "typescript": "^5.3.3"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/yourusername/llmcouncil"
+    },
+    "license": "MIT"
+}
