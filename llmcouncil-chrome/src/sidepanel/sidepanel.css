@@ -1,0 +1,198 @@
+body {
+    margin: 0;
+    padding: 0;
+    background: #f8f9fa;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.sidepanel-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+.panel-header {
+    background: white;
+    padding: 16px;
+    border-bottom: 2px solid #e9ecef;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.panel-header h1 {
+    margin: 0;
+    font-size: 18px;
+    color: #212529;
+}
+
+.analyze-btn {
+    padding: 8px 16px;
+    background: #0d6efd;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background 0.2s;
+}
+
+.analyze-btn:hover {
+    background: #0b5ed7;
+}
+
+.empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 40px;
+    color: #6c757d;
+}
+
+.empty-state p {
+    margin: 8px 0;
+}
+
+.hint {
+    font-size: 12px;
+    opacity: 0.7;
+}
+
+.analysis-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.agent-card {
+    background: white;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+    border: 1px solid #dee2e6;
+}
+
+.agent-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.agent-name {
+    font-weight: 600;
+    color: #212529;
+}
+
+.status {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.status-thinking {
+    background: #fff3cd;
+    color: #664d03;
+}
+
+.status-done {
+    background: #d1e7dd;
+    color: #0f5132;
+}
+
+.status-error {
+    background: #f8d7da;
+    color: #842029;
+}
+
+.spinner {
+    width: 10px;
+    height: 10px;
+    border: 2px solid #664d03;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.agent-analysis {
+    color: #495057;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
+
+.consensus-section {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    margin-top: 16px;
+    border-left: 4px solid #0d6efd;
+}
+
+.consensus-section h2 {
+    margin: 0 0 12px 0;
+    font-size: 16px;
+    color: #212529;
+}
+
+.consensus-meta {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.consensus-content {
+    color: #212529;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
+
+.error-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 40px;
+}
+
+.error-state h2 {
+    color: #dc3545;
+    margin-bottom: 16px;
+}
+
+.error-state p {
+    color: #6c757d;
+    margin-bottom: 24px;
+}
+
+.error-state button {
+    padding: 10px 24px;
+    background: #0d6efd;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.error-state button:hover {
+    background: #0b5ed7;
+}

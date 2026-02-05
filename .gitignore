@@ -1,52 +1,53 @@
+# Agent/AI files
+.agent/*
+
 # Dependencies
 node_modules/
-**/node_modules/
+package-lock.json
 
 # Build outputs
 dist/
 out/
 build/
-**/dist/
-**/out/
-**/build/
-
-# Package files
 *.vsix
-*.tgz
 
-# IDEs
-.vscode/
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
 .idea/
 *.swp
 *.swo
 *~
 
-# OS files
+# OS
 .DS_Store
 Thumbs.db
 *.log
 
 # Test coverage
 coverage/
-**/coverage/
+.nyc_output/
 
-# Environment
-.env
-.env.local
-.env*.local
-
-# Temporary
+# Temporary files
 *.tmp
 .cache/
 
-# Lock files (optional - uncomment if not tracking)
-# package-lock.json
-# pnpm-lock.yaml
-# yarn.lock
+# Chrome extension specific
+*.crx
+*.pem
 
-# Project-specific exclusions
-llmcouncil_-ai-assistant-suite.zip
-
-# Agent framework (entire directory)
-.agent/
-
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*

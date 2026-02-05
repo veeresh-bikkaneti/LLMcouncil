@@ -34,6 +34,10 @@ code --install-extension llmcouncil-vscode-0.1.0.vsix
 
 ## 🚀 Quick Start
 
+> [!TIP]
+> **Need a Visual Guide?**
+> Check out the [**Detailed User Guide**](USER_GUIDE.md) for step-by-step technical illustrations and UI breakdowns.
+
 ### Method 1: Analyze Selected Text (Recommended)
 
 1. **Select any text** in your editor (code, error message, user feedback, etc.)

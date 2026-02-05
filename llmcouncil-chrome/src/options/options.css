@@ -1,0 +1,152 @@
+body {
+    margin: 0;
+    padding: 0;
+    background: #f8f9fa;
+}
+
+.options-container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 20px;
+}
+
+.options-header {
+    text-align: center;
+    margin-bottom: 40px;
+}
+
+.options-header h1 {
+    margin: 0;
+    font-size: 32px;
+    color: #212529;
+}
+
+.subtitle {
+    margin: 8px 0 0 0;
+    font-size: 16px;
+    color: #6c757d;
+}
+
+.options-content {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+}
+
+.settings-section {
+    padding: 32px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.settings-section h2 {
+    margin: 0 0 24px 0;
+    font-size: 20px;
+    color: #212529;
+}
+
+.form-group {
+    margin-bottom: 24px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #495057;
+    font-size: 14px;
+}
+
+.form-control {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    font-size: 14px;
+    transition: border-color 0.2s;
+    box-sizing: border-box;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.1);
+}
+
+.form-hint {
+    display: block;
+    margin-top: 6px;
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.save-btn {
+    padding: 12px 32px;
+    background: #0d6efd;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 14px;
+}
+
+.save-btn:hover:not(:disabled) {
+    background: #0b5ed7;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(13, 110, 253, 0.3);
+}
+
+.save-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.save-btn.saved {
+    background: #198754;
+}
+
+.info-section {
+    padding: 32px;
+}
+
+.info-section h3 {
+    margin: 0 0 12px 0;
+    font-size: 18px;
+    color: #212529;
+}
+
+.info-section h4 {
+    margin: 20px 0 12px 0;
+    font-size: 14px;
+    color: #495057;
+    font-weight: 600;
+}
+
+.info-section p {
+    margin: 0 0 16px 0;
+    color: #6c757d;
+    line-height: 1.6;
+}
+
+.info-section ul {
+    margin: 0 0 24px 0;
+    padding-left: 24px;
+    color: #495057;
+}
+
+.info-section li {
+    margin-bottom: 8px;
+    line-height: 1.5;
+}
+
+.privacy-note {
+    background: #e7f5ff;
+    border-left: 4px solid #0d6efd;
+    padding: 16px;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #084298;
+    line-height: 1.5;
+}
