@@ -101,7 +101,7 @@ export class CouncilPanel {
   }
 
   private getHtmlContent(context: vscode.ExtensionContext): string {
-    const templatePath = path.join(context.extensionPath, 'src', 'webview', 'panel-template.html');
+    const templatePath = path.join(context.extensionPath, 'media', 'panel-template.html');
     return fs.readFileSync(templatePath, 'utf8');
   }
 
