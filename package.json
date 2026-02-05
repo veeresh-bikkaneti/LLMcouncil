@@ -1,6 +1,6 @@
 {
     "name": "llmcouncil-vscode",
-    "displayName": "LLM Council",
+    "displayName": "LLM Council - Multi-Agent AI",
     "description": "Multi-agent AI analysis using parallel LLM execution",
     "version": "0.1.0",
     "publisher": "RUNTechnologyConsultingServicesLLC",

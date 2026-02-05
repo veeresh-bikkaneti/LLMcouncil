@@ -1,6 +1,30 @@
+# Dependencies
 node_modules/
+package-lock.json
+
+# Build outputs
 out/
 dist/
+
+# Extension packages
 *.vsix
+
+# Testing
 .vscode-test/
+coverage/
+
+# IDE
 .vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+
+# Temporary files
+*.tmp
+.cache/
