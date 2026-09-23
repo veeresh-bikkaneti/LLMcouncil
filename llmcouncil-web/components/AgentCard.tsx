@@ -68,7 +68,7 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, onAnalysisChange, useAutom
             </div>
           </div>
         </div>
-        <div className={`text-[10px] font-black px-4 py-2 rounded-xl uppercase tracking-widest border flex-shrink-0 ${isThinking ? 'text-violet-400 border-violet-500/30 bg-violet-500/5 shadow-[0_0_15px_rgba(139,92,246,0.1)]' : isError ? 'text-amber-500 border-amber-500/30 bg-amber-500/5' : 'text-slate-500 border-slate-800 bg-slate-900/50'}`}>
+        <div className={`text-[10px] font-black px-4 py-2 rounded-xl uppercase tracking-widest border flex-shrink-0 ${isThinking ? 'text-violet-400 border-violet-500/30 bg-violet-500/5 shadow-[0_0_15px_rgba(139,92,246,0.1)]' : isError ? 'text-amber-500 border-amber-500/30 bg-amber-500/5' : isDone ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/5' : 'text-slate-500 border-slate-800 bg-slate-900/50'}`}>
           {agent.status}
         </div>
       </div>
@@ -101,13 +101,20 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, onAnalysisChange, useAutom
         </div>
 
         {isThinking ? (
-          <div className="flex items-center gap-6 py-12 px-10 bg-slate-950/40 rounded-[2rem] border border-slate-800/40 border-dashed animate-pulse">
-            <div className="flex gap-3">
-              <div className="w-2.5 h-2.5 rounded-full bg-violet-500 animate-bounce" />
-              <div className="w-2.5 h-2.5 rounded-full bg-violet-500 animate-bounce delay-150" />
-              <div className="w-2.5 h-2.5 rounded-full bg-violet-500 animate-bounce delay-300" />
+          <div className="flex flex-col gap-5 py-10 px-10 bg-slate-950/40 rounded-[2rem] border border-slate-800/40 border-dashed">
+            <div className="flex items-center gap-4">
+              <div className="flex gap-2">
+                <div className="w-2 h-2 rounded-full bg-violet-500 animate-bounce" />
+                <div className="w-2 h-2 rounded-full bg-violet-500 animate-bounce delay-150" />
+                <div className="w-2 h-2 rounded-full bg-violet-500 animate-bounce delay-300" />
+              </div>
+              <span className="text-[11px] text-violet-400 font-black uppercase tracking-[0.3em]">Streaming Analysis</span>
             </div>
-            <span className="text-[12px] text-violet-400 font-black uppercase tracking-[0.4em]">Parallel Deliberation in progress</span>
+            <div className="flex flex-col gap-3">
+              <div className="shimmer-line" style={{ width: '92%' }} />
+              <div className="shimmer-line" style={{ width: '78%' }} />
+              <div className="shimmer-line" style={{ width: '85%' }} />
+            </div>
           </div>
         ) : isError ? (
           <div className="bg-amber-500/[0.04] p-10 rounded-[2rem] border border-amber-500/20 shadow-inner">
