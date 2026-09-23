@@ -11,6 +11,20 @@ interface ConsensusDashboardProps {
   agentAnalyses: AgentAnalysis[];
 }
 
+const STATUS_LABEL: Record<AgentAnalysis['status'], string> = {
+  idle: 'Waiting for Council',
+  thinking: 'Synthesizing',
+  done: 'Consensus Reached',
+  error: 'Arbitration Failed',
+};
+
+const STATUS_STYLE: Record<AgentAnalysis['status'], string> = {
+  idle: 'text-slate-500 border-slate-800 bg-slate-900/50',
+  thinking: 'text-violet-400 border-violet-500/30 bg-violet-500/5',
+  done: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/5',
+  error: 'text-amber-500 border-amber-500/30 bg-amber-500/5',
+};
+
 const ConsensusDashboard: React.FC<ConsensusDashboardProps> = ({ consensus, chairpersonStatus, chairpersonUsage, originalQuery, agentAnalyses }) => {
   const modelName = 'gemini-3-pro-preview';
 
@@ -64,12 +78,16 @@ const ConsensusDashboard: React.FC<ConsensusDashboardProps> = ({ consensus, chai
     }
     if (chairpersonStatus === 'thinking') {
       return (
-        <div className="flex flex-col items-center justify-center py-24 text-slate-400 bg-slate-900/20 rounded-[2rem] border border-violet-500/20">
-          <div className="relative mb-10">
+        <div className="flex flex-col items-center gap-10 py-16 px-10 text-slate-400 bg-slate-900/20 rounded-[2rem] border border-violet-500/20">
+          <div className="relative">
             <div className="animate-ping absolute inset-0 rounded-full h-20 w-20 bg-violet-500/20"></div>
             <div className="animate-spin rounded-full h-20 w-20 border-4 border-slate-800 border-t-violet-500"></div>
           </div>
           <span className="font-black uppercase tracking-[0.4em] text-xs text-violet-400 animate-pulse">Orchestrating Consensus</span>
+          <div className="w-full max-w-md flex flex-col gap-3">
+            <div className="shimmer-line" style={{ width: '96%' }} />
+            <div className="shimmer-line" style={{ width: '82%' }} />
+          </div>
         </div>
       );
     }
@@ -106,7 +124,7 @@ const ConsensusDashboard: React.FC<ConsensusDashboardProps> = ({ consensus, chai
 
   return (
     <div className="bg-slate-900/95 border border-slate-800 rounded-[2.5rem] shadow-2xl p-10 backdrop-blur-xl">
-      <div className="flex items-center justify-between mb-12">
+      <div className="flex items-center justify-between mb-12 flex-wrap gap-6">
         <div className="flex items-center">
             <div className="p-4 bg-violet-500/10 rounded-2xl mr-6 border border-violet-500/20 shadow-inner">
                 <ChairpersonIcon className="w-9 h-9 text-violet-400" />
@@ -125,6 +143,9 @@ const ConsensusDashboard: React.FC<ConsensusDashboardProps> = ({ consensus, chai
                   )}
                 </div>
             </div>
+        </div>
+        <div className={`text-[10px] font-black px-4 py-2 rounded-xl uppercase tracking-widest border flex-shrink-0 ${STATUS_STYLE[chairpersonStatus]}`}>
+          {STATUS_LABEL[chairpersonStatus]}
         </div>
       </div>
       {renderContent()}

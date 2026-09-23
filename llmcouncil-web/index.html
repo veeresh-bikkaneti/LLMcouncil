@@ -32,9 +32,20 @@
       .node-1 { animation: nodePulse 1.5s infinite ease-in-out; }
       .node-2 { animation: nodePulse 1.5s infinite ease-in-out 0.5s; }
       .node-3 { animation: nodePulse 1.5s infinite ease-in-out 1s; }
-      .path-flow { 
-        stroke-dasharray: 4; 
-        animation: pathFlow 2s infinite linear; 
+      .path-flow {
+        stroke-dasharray: 4;
+        animation: pathFlow 2s infinite linear;
+      }
+      @keyframes shimmer {
+        0% { background-position: -200px 0; }
+        100% { background-position: 200px 0; }
+      }
+      .shimmer-line {
+        background: linear-gradient(90deg, #1e293b 0%, #334155 50%, #1e293b 100%);
+        background-size: 200px 100%;
+        animation: shimmer 1.3s linear infinite;
+        border-radius: 6px;
+        height: 10px;
       }
     </style>
   <script type="importmap">

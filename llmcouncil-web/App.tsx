@@ -1,14 +1,20 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, Suspense, lazy } from 'react';
 import { AgentRole, type AgentAnalysis, type ConsensusReport, type ModelQuota, type AnswerMode } from './types';
 import { analyzeWithAgent, synthesizeConsensus, sanitizeText } from './services/inferenceService';
 import InputPanel, { INITIAL_MODELS } from './components/TicketInputForm';
 import CouncilView from './components/CouncilView';
 import ConsensusDashboard from './components/ConsensusDashboard';
+import ModeSwitcher, { type AppMode } from './components/ModeSwitcher';
 import { LogoIcon } from './components/icons';
+
+// Lazy-loaded so the @mlc-ai/web-llm engine (and its WASM/model download machinery)
+// is only pulled into the bundle when the user actually switches to Local Assistant mode.
+const GroundedAssistant = lazy(() => import('./components/GroundedAssistant'));
 
 const STORAGE_KEY = 'llm_council_selections_v3';
 
 const App: React.FC = () => {
+  const [mode, setMode] = useState<AppMode>('council');
   const [query, setQuery] = useState<string>('');
   const [useAutomation, setUseAutomation] = useState<boolean>(true);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -155,6 +161,7 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-6">
+             <ModeSwitcher mode={mode} onChange={setMode} />
              <div className="hidden sm:flex items-center gap-3 bg-slate-900/60 px-6 py-2.5 rounded-2xl border border-slate-800 shadow-xl backdrop-blur-md">
                 <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Gateway Ready</span>
@@ -162,36 +169,59 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        <main className="grid grid-cols-1 lg:grid-cols-5 gap-16">
-          <div className="lg:col-span-2">
-            <InputPanel 
-              query={query} setQuery={setQuery} 
-              handleSubmit={handleSubmit} handleCancel={() => {}}
-              isLoading={isLoading} useAutomation={useAutomation} setUseAutomation={setUseAutomation}
-              selectedModels={selectedModelIds} 
-              onModelChange={handleModelChange}
-              requestCounts={requestCounts}
-              onShowCancel={() => setShowCancelConfirm(true)}
-              answerMode={answerMode}
-              setAnswerMode={setAnswerMode}
-            />
-          </div>
-          <div className="lg:col-span-3 space-y-20">
-            <CouncilView 
-              agentAnalyses={agentAnalyses.filter(a => a.role !== AgentRole.Chairperson)} 
-              onAnalysisChange={(role, text) => updateAgent(role, { analysis: text })} 
-              useAutomation={useAutomation} 
-              requestCounts={requestCounts}
-            />
-            <ConsensusDashboard 
-              consensus={consensus} 
-              chairpersonStatus={agentAnalyses.find(a => a.role === AgentRole.Chairperson)?.status || 'idle'}
-              chairpersonUsage={agentAnalyses.find(a => a.role === AgentRole.Chairperson)?.usage}
-              originalQuery={query}
-              agentAnalyses={agentAnalyses}
-            />
-          </div>
-        </main>
+        {mode === 'council' ? (
+          <main className="grid grid-cols-1 lg:grid-cols-5 gap-16">
+            <div className="lg:col-span-2">
+              <InputPanel
+                query={query} setQuery={setQuery}
+                handleSubmit={handleSubmit} handleCancel={() => {}}
+                isLoading={isLoading} useAutomation={useAutomation} setUseAutomation={setUseAutomation}
+                selectedModels={selectedModelIds}
+                onModelChange={handleModelChange}
+                requestCounts={requestCounts}
+                onShowCancel={() => setShowCancelConfirm(true)}
+                answerMode={answerMode}
+                setAnswerMode={setAnswerMode}
+              />
+            </div>
+            <div className="lg:col-span-3 space-y-20">
+              {error && (
+                <div className="bg-rose-500/5 border border-rose-500/20 rounded-[2rem] p-8 flex items-start gap-4">
+                  <div className="w-2 h-2 mt-1.5 rounded-full bg-rose-500 flex-shrink-0" />
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-widest text-rose-400 mb-1.5">Signal Failed</p>
+                    <p className="text-sm text-rose-200/70 leading-relaxed">{error}</p>
+                  </div>
+                </div>
+              )}
+              <CouncilView
+                agentAnalyses={agentAnalyses.filter(a => a.role !== AgentRole.Chairperson)}
+                onAnalysisChange={(role, text) => updateAgent(role, { analysis: text })}
+                useAutomation={useAutomation}
+                requestCounts={requestCounts}
+              />
+              <ConsensusDashboard
+                consensus={consensus}
+                chairpersonStatus={agentAnalyses.find(a => a.role === AgentRole.Chairperson)?.status || 'idle'}
+                chairpersonUsage={agentAnalyses.find(a => a.role === AgentRole.Chairperson)?.usage}
+                originalQuery={query}
+                agentAnalyses={agentAnalyses}
+              />
+            </div>
+          </main>
+        ) : (
+          <main className="max-w-3xl mx-auto">
+            <Suspense
+              fallback={
+                <div className="text-center text-[11px] text-slate-500 uppercase tracking-widest font-black py-24">
+                  Loading Local Assistant…
+                </div>
+              }
+            >
+              <GroundedAssistant />
+            </Suspense>
+          </main>
+        )}
       </div>
     </div>
   );
