@@ -91,14 +91,24 @@ export function isWebGPUSupported(): boolean {
   return typeof navigator !== 'undefined' && !!(navigator as unknown as { gpu?: unknown }).gpu;
 }
 
-const CONFIDENCE_TAG_RE = /Confidence Level:\s*\[?\s*(High|Medium|Low)\s*\]?\.?\s*$/i;
+// Tolerant of markdown emphasis wrapping (models routinely bold this line despite
+// instructions not to) and trailing punctuation, while still anchoring to the end of
+// the reply so it only strips the actual trailing confidence line, not a mid-answer
+// mention of the word "confidence".
+const CONFIDENCE_TAG_RE = /[\s*_]*Confidence Level[\s*_]*:[\s*_]*\[?\s*(High|Medium|Low)\s*\]?[\s*_.]*$/i;
+
+// Some reasoning-tuned models (e.g. DeepSeek-R1 distills) emit a raw <think>...</think>
+// block ahead of their real answer. Strip it from the final rendered/parsed text so it
+// doesn't dump unformatted chain-of-thought into the "Grounded Answer" card.
+const THINK_BLOCK_RE = /<think>[\s\S]*?<\/think>/gi;
 
 /**
- * Generic JavaScript orchestrator around a small (~0.5B-1.7B parameter) in-browser
- * model. The model is deliberately NEVER given tool-calling autonomy -- it is too
- * small to reliably drive tools. Instead this class runs the retrieval step itself
- * (executeWebSearch), formats the results into a restricted system prompt, and uses
- * the model purely as a grounded text synthesizer that must cite its sources.
+ * Generic JavaScript orchestrator around small-to-mid-size (~1.5B-8B parameter)
+ * in-browser models. Models are deliberately NEVER given tool-calling autonomy -- even
+ * the larger tiers here are not trusted to drive tools reliably. Instead this class
+ * runs the retrieval step itself (executeWebSearch), formats the results into a
+ * restricted system prompt, and uses the model purely as a grounded text synthesizer
+ * that must cite its sources.
  */
 export class WebLLMChatbot {
   private engine: MLCEngineInterface | null = null;
@@ -118,13 +128,10 @@ export class WebLLMChatbot {
     return this.modelId;
   }
 
-  isReady(): boolean {
-    return this.engine !== null;
-  }
-
   /**
-   * Boots the in-browser engine, streaming coarse download/compile progress (the
-   * ~750MB-1.3GB model weights are cached by the browser after the first run).
+   * Boots the in-browser engine, streaming coarse download/compile progress (weights
+   * range from ~1.6GB to ~5.1GB depending on the selected tier, and are cached by the
+   * browser after the first run).
    */
   async init(onProgress: (progressText: string, fraction?: number) => void): Promise<void> {
     if (!isWebGPUSupported()) {
@@ -226,9 +233,13 @@ export class WebLLMChatbot {
       }
     }
 
-    const confidenceMatch = fullText.match(CONFIDENCE_TAG_RE);
+    const withoutThinking = fullText.replace(THINK_BLOCK_RE, '').trim();
+    const confidenceMatch = withoutThinking.match(CONFIDENCE_TAG_RE);
     const confidence = (confidenceMatch ? confidenceMatch[1] : null) as ConfidenceLevel | null;
-    const answer = confidenceMatch ? fullText.slice(0, confidenceMatch.index).trim() : fullText.trim();
+    const rawAnswer = confidenceMatch ? withoutThinking.slice(0, confidenceMatch.index).trim() : withoutThinking;
+    // The model's own output is never trusted with PII, even though the prompt asks it
+    // not to include any: it can hallucinate or copy PII straight out of a source.
+    const answer = sanitizePII(rawAnswer);
 
     return { fullText, answer, sources, confidence };
   }

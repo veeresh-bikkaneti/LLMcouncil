@@ -117,7 +117,7 @@ export async function executeWebSearch(query: string, opts: SearchOptions = {}):
   const trimmedQuery = query.trim();
   if (!trimmedQuery) return [];
 
-  if (opts.apiKey && (provider === 'auto' || provider === 'tavily')) {
+  if (opts.apiKey && provider !== 'brave') {
     try {
       return await searchTavily(trimmedQuery, opts.apiKey, maxResults);
     } catch (err) {
@@ -125,7 +125,10 @@ export async function executeWebSearch(query: string, opts: SearchOptions = {}):
     }
   }
 
-  if (opts.apiKey && provider === 'brave') {
+  // In 'auto' mode we don't know which provider the pasted key belongs to, so a
+  // failed Tavily attempt also gets a Brave attempt before giving up on the key
+  // entirely -- otherwise a valid Brave key silently never gets used.
+  if (opts.apiKey && provider !== 'tavily') {
     try {
       return await searchBrave(trimmedQuery, opts.apiKey, maxResults);
     } catch (err) {

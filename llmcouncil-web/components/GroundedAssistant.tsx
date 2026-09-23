@@ -6,6 +6,7 @@ import {
   DEFAULT_MODEL_ID,
 } from '../src/engine/chatbot';
 import type { ConfidenceLevel, EngineModelOption, ModelCapability, ModelTier, SearchResult } from '../src/engine/types';
+import { sanitizePII } from '../src/engine/sanitize';
 import GroundingDrawer from './GroundingDrawer';
 import {
   AlertTriangleIcon,
@@ -141,7 +142,7 @@ const ModelCard: React.FC<{ model: EngineModelOption; selected: boolean; onSelec
     <div>
       <div className="text-[16px] font-bold text-white">{model.label}</div>
       <div className="font-mono text-[10.5px] text-slate-500 mt-1 tracking-wide">
-        {model.sizeLabel.replace('~', '')} · {model.vramLabel.replace('~', '')}
+        {model.sizeLabel} · {model.vramLabel}
       </div>
     </div>
     <div className="flex flex-wrap gap-x-4 gap-y-2">
@@ -239,6 +240,7 @@ const GroundedAssistant: React.FC = () => {
   const [drawerQuery, setDrawerQuery] = useState<string | null>(null);
 
   const botRef = useRef<WebLLMChatbot | null>(null);
+  const loadingRef = useRef(false);
   const selectedModel = useMemo(() => AVAILABLE_MODELS.find((m) => m.id === modelId) ?? AVAILABLE_MODELS[0], [modelId]);
 
   useEffect(() => {
@@ -252,7 +254,8 @@ const GroundedAssistant: React.FC = () => {
   }, [searchApiKey]);
 
   const handleLoadModel = async () => {
-    if (!webgpuOk) return;
+    if (!webgpuOk || loadingRef.current) return;
+    loadingRef.current = true;
     setStatus('loading');
     setError(null);
     setProgressFraction(0);
@@ -276,10 +279,13 @@ const GroundedAssistant: React.FC = () => {
     } catch (e) {
       setError((e as Error).message);
       setStatus('error');
+    } finally {
+      loadingRef.current = false;
     }
   };
 
   const handleChangeModel = async () => {
+    if (isStreaming) return;
     await botRef.current?.dispose();
     botRef.current = null;
     setTurns([]);
@@ -287,7 +293,7 @@ const GroundedAssistant: React.FC = () => {
   };
 
   const handleSend = async () => {
-    const query = input.trim();
+    const query = sanitizePII(input.trim());
     if (!query || !botRef.current || isStreaming || status !== 'ready') return;
 
     setInput('');
@@ -363,6 +369,12 @@ const GroundedAssistant: React.FC = () => {
               {AVAILABLE_MODELS.filter((m) => m.tier === tier).map((m) => (
                 <ModelCard key={m.id} model={m} selected={modelId === m.id} onSelect={() => setModelId(m.id)} />
               ))}
+              {tier === 'deep' && (
+                <p className="text-[9.5px] text-slate-600 leading-relaxed">
+                  Capability tags describe what the model weights support natively. This app always runs its
+                  own search step for every model — none of them are given tool-calling control.
+                </p>
+              )}
             </div>
           ))}
         </div>
@@ -445,7 +457,11 @@ const GroundedAssistant: React.FC = () => {
               {selectedModel.capabilities.slice(0, 2).map((c) => (
                 <DotTag key={c} text={CAPABILITY_TEXT[c]} dot={CAPABILITY_DOT[c]} label={CAPABILITY_LABEL[c]} />
               ))}
-              <button onClick={handleChangeModel} className="text-[11px] font-bold text-violet-400 hover:text-violet-300 transition-colors">
+              <button
+                onClick={handleChangeModel}
+                disabled={isStreaming}
+                className="text-[11px] font-bold text-violet-400 hover:text-violet-300 disabled:opacity-40 disabled:hover:text-violet-400 transition-colors"
+              >
                 Change
               </button>
             </div>
@@ -456,7 +472,11 @@ const GroundedAssistant: React.FC = () => {
               dot="bg-emerald-400"
               label={`Grounding · ${searchApiKey ? 'Cloud Search' : 'Wikipedia (free)'}`}
             />
-            <button className="px-4 py-2 rounded-lg border border-white/[0.1] bg-white/[0.02] text-slate-300 text-[11px] font-bold flex items-center gap-1.5">
+            <button
+              onClick={() => latestTurn && openDrawerFor(latestTurn)}
+              disabled={!latestTurn}
+              className="px-4 py-2 rounded-lg border border-white/[0.1] bg-white/[0.02] text-slate-300 text-[11px] font-bold flex items-center gap-1.5 disabled:opacity-40"
+            >
               <ShieldIcon className="w-3 h-3" /> View sources
             </button>
           </div>
@@ -475,7 +495,7 @@ const GroundedAssistant: React.FC = () => {
               handleSend();
             }
           }}
-          placeholder={turns.length === 0 ? 'Ask a grounded question…' : 'Ask a follow-up…'}
+          placeholder={turns.length === 0 ? 'Ask a grounded question…' : 'Ask another grounded question…'}
           disabled={isStreaming}
           className="flex-grow bg-transparent text-[14px] text-slate-100 placeholder:text-slate-600 outline-none disabled:opacity-50"
         />
