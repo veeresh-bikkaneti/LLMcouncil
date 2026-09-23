@@ -22,11 +22,27 @@ export interface SearchOptions {
   maxResults?: number;
 }
 
+export type ModelCapability =
+  | 'reasoning'
+  | 'chain-of-thought'
+  | 'tool-calling'
+  | 'fast'
+  | 'summarizing'
+  | 'understanding';
+
+export type ModelTier = 'fast' | 'balanced' | 'deep';
+
 export interface EngineModelOption {
   id: string;
   label: string;
+  tier: ModelTier;
+  capabilities: ModelCapability[];
   /** Approximate download size, shown to the user before they commit to a download. */
   sizeLabel: string;
+  /** Approximate WebGPU VRAM needed to run this model at a usable speed. */
+  vramLabel: string;
+  description: string;
+  recommended?: boolean;
 }
 
 export interface WebLLMChatbotOptions {
