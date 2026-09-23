@@ -185,6 +185,15 @@ const App: React.FC = () => {
               />
             </div>
             <div className="lg:col-span-3 space-y-20">
+              {error && (
+                <div className="bg-rose-500/5 border border-rose-500/20 rounded-[2rem] p-8 flex items-start gap-4">
+                  <div className="w-2 h-2 mt-1.5 rounded-full bg-rose-500 flex-shrink-0" />
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-widest text-rose-400 mb-1.5">Signal Failed</p>
+                    <p className="text-sm text-rose-200/70 leading-relaxed">{error}</p>
+                  </div>
+                </div>
+              )}
               <CouncilView
                 agentAnalyses={agentAnalyses.filter(a => a.role !== AgentRole.Chairperson)}
                 onAnalysisChange={(role, text) => updateAgent(role, { analysis: text })}

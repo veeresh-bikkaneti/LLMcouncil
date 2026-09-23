@@ -141,11 +141,22 @@ export class WebLLMChatbot {
       );
     }
 
-    this.engine = await CreateMLCEngine(this.modelId, {
-      initProgressCallback: (report: InitProgressReport) => {
-        onProgress(report.text, report.progress);
-      },
-    });
+    try {
+      this.engine = await CreateMLCEngine(this.modelId, {
+        initProgressCallback: (report: InitProgressReport) => {
+          onProgress(report.text, report.progress);
+        },
+      });
+    } catch (e) {
+      const detail = (e as Error).message || String(e);
+      if (/fetch/i.test(detail)) {
+        throw new Error(
+          `Could not download the model weights (${detail}). Check your internet connection, ` +
+            'or try a smaller model if this one is too large for your connection.'
+        );
+      }
+      throw e;
+    }
   }
 
   /**
