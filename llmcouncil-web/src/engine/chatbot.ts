@@ -18,7 +18,9 @@ const MAX_REPLY_TOKENS = getDeviceProfile().constrained ? 400 : 900;
  * engineManager and is shared with the Council.
  */
 export class WebLLMChatbot {
-  private readonly modelId: string;
+  // Not readonly: init() may resolve to a smaller model than requested if this one
+  // doesn't actually fit the device (see engineManager's loadModel/ensureEngine).
+  private modelId: string;
   private readonly searchApiKey?: string;
   private readonly searchProvider: WebLLMChatbotOptions['searchProvider'];
   private readonly maxSources: number;
@@ -31,13 +33,15 @@ export class WebLLMChatbot {
     this.maxSources = options.maxSources ?? 5;
   }
 
+  /** The model actually loaded, once init() has run -- may differ from what was
+   *  requested if that one didn't fit this device (see engineManager). */
   getModelId(): string {
     return this.modelId;
   }
 
   /** Downloads (first run only; the browser caches weights) and compiles the model. */
   async init(onProgress: ProgressFn): Promise<void> {
-    await loadModel(this.modelId, onProgress);
+    this.modelId = await loadModel(this.modelId, onProgress);
     this.ready = true;
   }
 

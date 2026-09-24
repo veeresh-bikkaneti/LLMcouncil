@@ -107,9 +107,53 @@ async function searchWikipedia(query: string, maxResults: number): Promise<Searc
 }
 
 /**
+ * Keyless, CORS-enabled second fallback source (DuckDuckGo's Instant Answer API).
+ * Narrower than Wikipedia -- it returns an infobox-style abstract plus related-topic
+ * blurbs for a well-known entity or term, not general web search -- so it's tried
+ * only when Wikipedia comes back empty or fails, not as a primary source.
+ */
+async function searchDuckDuckGo(query: string, maxResults: number): Promise<SearchResult[]> {
+  const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1&t=llmcouncil`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`DuckDuckGo search failed: HTTP ${response.status}`);
+  }
+  const data = await response.json();
+
+  interface Topic {
+    Text?: string;
+    FirstURL?: string;
+    Topics?: Topic[];
+  }
+  const flatten = (topics: Topic[] | undefined): Topic[] =>
+    (topics ?? []).flatMap((t) => (t.Topics ? flatten(t.Topics) : [t]));
+
+  const items: Array<{ title: string; url: string; content: string }> = [];
+  if (data.AbstractText) {
+    items.push({ title: data.Heading || query, url: data.AbstractURL, content: data.AbstractText });
+  }
+  for (const topic of flatten(data.RelatedTopics)) {
+    if (!topic.Text || !topic.FirstURL) continue;
+    // DDG's related-topic "title" is just the article name repeated at the start of
+    // Text (e.g. "Paris - Capital of France..."); split it back out for a real title.
+    const [title, ...rest] = topic.Text.split(' - ');
+    items.push({ title: title || topic.Text, url: topic.FirstURL, content: rest.join(' - ') || topic.Text });
+  }
+
+  return items.slice(0, maxResults).map((item, i): SearchResult => ({
+    id: i + 1,
+    title: item.title,
+    url: item.url,
+    content: truncate(item.content),
+    source: 'duckduckgo',
+  }));
+}
+
+/**
  * The runtime search connector used by the orchestrator. Prefers the user's own cloud
  * search API key when one is configured; otherwise grounds the query against the
- * keyless Wikipedia fallback so the app never requires a cloud credential to function.
+ * keyless Wikipedia fallback, with a second keyless attempt (DuckDuckGo) so the app
+ * never requires a cloud credential to function.
  */
 export async function executeWebSearch(query: string, opts: SearchOptions = {}): Promise<SearchResult[]> {
   const maxResults = opts.maxResults ?? 5;
@@ -137,9 +181,16 @@ export async function executeWebSearch(query: string, opts: SearchOptions = {}):
   }
 
   try {
-    return await searchWikipedia(trimmedQuery, maxResults);
+    const results = await searchWikipedia(trimmedQuery, maxResults);
+    if (results.length > 0) return results;
   } catch (err) {
-    console.warn('[executeWebSearch] Wikipedia grounding failed:', err);
+    console.warn('[executeWebSearch] Wikipedia grounding failed, trying DuckDuckGo:', err);
+  }
+
+  try {
+    return await searchDuckDuckGo(trimmedQuery, maxResults);
+  } catch (err) {
+    console.warn('[executeWebSearch] DuckDuckGo grounding failed:', err);
     return [];
   }
 }

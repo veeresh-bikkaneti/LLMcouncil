@@ -172,8 +172,18 @@ const App: React.FC = () => {
         const model = modelFor(role)!;
         updateAgent(role, { status: 'thinking', modelName: model.id, providerType: model.providerType });
         try {
-          const { text, usage } = await analyzeWithAgent(role, cleanQuery, model, answerMode, hooks);
-          return { role, analysis: text, usage, status: 'done' as const, modelName: model.id, providerType: model.providerType, prompt: cleanQuery };
+          const { text, usage, resolvedModelId } = await analyzeWithAgent(role, cleanQuery, model, answerMode, hooks);
+          return {
+            role,
+            analysis: text,
+            usage,
+            status: 'done' as const,
+            // The seat may have run on a smaller model than selected, if the chosen
+            // one didn't fit this device (see engineManager's step-down ladder).
+            modelName: resolvedModelId ?? model.id,
+            providerType: model.providerType,
+            prompt: cleanQuery,
+          };
         } catch (e) {
           return { role, analysis: (e as Error).message, status: 'error' as const, modelName: model.id, providerType: model.providerType, prompt: cleanQuery };
         }
@@ -197,10 +207,10 @@ const App: React.FC = () => {
       const chairModel = modelFor(AgentRole.Chairperson)!;
       updateAgent(AgentRole.Chairperson, { status: 'thinking', modelName: chairModel.id, providerType: chairModel.providerType });
       try {
-        const { report, usage } = await synthesizeConsensus(cleanQuery, successfulResults, answerMode, chairModel, hooks);
+        const { report, usage, resolvedModelId } = await synthesizeConsensus(cleanQuery, successfulResults, answerMode, chairModel, hooks);
         if (isStale()) return;
         setConsensus(report);
-        updateAgent(AgentRole.Chairperson, { status: 'done', usage });
+        updateAgent(AgentRole.Chairperson, { status: 'done', usage, ...(resolvedModelId ? { modelName: resolvedModelId } : {}) });
       } catch (e) {
         if (isStale()) return;
         const message = (e as Error).message;
@@ -315,7 +325,12 @@ const App: React.FC = () => {
                 chairpersonUsage={agentAnalyses.find(a => a.role === AgentRole.Chairperson)?.usage}
                 originalQuery={query}
                 agentAnalyses={agentAnalyses}
-                chairModelLabel={registry.find(m => m.id === selectedModelIds[AgentRole.Chairperson])?.label ?? selectedModelIds[AgentRole.Chairperson]}
+                chairModelLabel={(() => {
+                  // Reflects the model that actually ran once resolved (see the
+                  // step-down ladder), falling back to the selected one beforehand.
+                  const chairId = agentAnalyses.find(a => a.role === AgentRole.Chairperson)?.modelName ?? selectedModelIds[AgentRole.Chairperson];
+                  return registry.find(m => m.id === chairId)?.label ?? chairId;
+                })()}
                 sources={sources}
               />
             </div>

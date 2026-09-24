@@ -19,6 +19,9 @@ export interface LocalRunHooks {
 interface AgentResult {
   text: string;
   usage?: TokenUsage;
+  /** The model actually used, if it differs from the one the seat was set to (see
+   *  engineManager's step-down ladder). Only ever set for webllm results. */
+  resolvedModelId?: string;
 }
 
 const extractUsage = (response: any): TokenUsage | undefined => {
@@ -156,21 +159,30 @@ const runLocal = async (
   userPrompt: string,
   mode: AnswerMode,
   hooks?: LocalRunHooks
-): Promise<string> => {
+): Promise<{ text: string; resolvedModelId: string }> => {
   // Captured before the import: on a cold cache the engine chunk can take a while to
   // arrive, and an abort in the meantime must still cancel this generation.
   const epoch = currentEpoch('council');
   // Dynamic import keeps the ~6MB WebLLM runtime out of the main bundle until an
   // in-browser model is actually used.
   const { generate } = await import('../src/engine/engineManager');
-  return generate(
+  let resolvedModelId = model.id;
+  const text = await generate(
     model.id,
     [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
-    { scope: 'council', epoch, temperature: 0, maxTokens: LOCAL_MAX_TOKENS[mode], onProgress: hooks?.onProgress }
+    {
+      scope: 'council',
+      epoch,
+      temperature: 0,
+      maxTokens: LOCAL_MAX_TOKENS[mode],
+      onProgress: hooks?.onProgress,
+      onModelResolved: (id) => { resolvedModelId = id; },
+    }
   );
+  return { text, resolvedModelId };
 };
 
 export const analyzeWithAgent = async (
@@ -187,9 +199,10 @@ export const analyzeWithAgent = async (
       GROUNDING_RULES,
       `SOURCES:\n${formatSources(hooks?.sources ?? [], budget.remaining)}`,
     ].join('\n\n');
-    const { answer } = parseGroundedOutput(await runLocal(model, systemPrompt, budget.query, mode, hooks));
+    const { text: raw, resolvedModelId } = await runLocal(model, systemPrompt, budget.query, mode, hooks);
+    const { answer } = parseGroundedOutput(raw);
     if (!answer) throw new Error(`${model.label} returned an empty answer.`);
-    return { text: answer };
+    return { text: answer, resolvedModelId: resolvedModelId !== model.id ? resolvedModelId : undefined };
   }
 
   const prompt = getAgentPrompt(role, query);
@@ -230,7 +243,7 @@ export const synthesizeConsensus = async (
   mode: AnswerMode,
   chairModel: ModelQuota,
   hooks?: LocalRunHooks
-): Promise<{ report: ConsensusReport; usage?: TokenUsage }> => {
+): Promise<{ report: ConsensusReport; usage?: TokenUsage; resolvedModelId?: string }> => {
   const perspectives = analyses.map(a => `## [${a.role} (${a.modelName})]\n${a.analysis}`).join('\n\n');
   const instruction = `Arbitrate and synthesize these multi-agent deliberations into a single superior consensus for: "${query}"`;
 
@@ -251,10 +264,13 @@ export const synthesizeConsensus = async (
       `SOURCES:\n${formatSources(hooks?.sources ?? [], sourceChars)}`,
     ].join('\n\n');
     const localInstruction = `Arbitrate and synthesize these multi-agent deliberations into a single superior consensus for: "${budget.query}"`;
-    const raw = await runLocal(chairModel, systemPrompt, `${localInstruction}\n\n${localPerspectives}`, mode, hooks);
+    const { text: raw, resolvedModelId } = await runLocal(chairModel, systemPrompt, `${localInstruction}\n\n${localPerspectives}`, mode, hooks);
     const { answer, confidence } = parseGroundedOutput(raw);
     if (!answer) throw new Error(`${chairModel.label} returned an empty synthesis.`);
-    return { report: { comprehensiveAnswer: answer, confidence } };
+    return {
+      report: { comprehensiveAnswer: answer, confidence },
+      resolvedModelId: resolvedModelId !== chairModel.id ? resolvedModelId : undefined,
+    };
   }
 
   if (chairModel.providerType === 'native-gemini') {
