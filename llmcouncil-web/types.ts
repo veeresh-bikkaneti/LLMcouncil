@@ -6,7 +6,7 @@ export enum AgentRole {
   Chairperson = 'Chairperson'
 }
 
-export type ProviderType = 'native-gemini' | 'openai-compatible' | 'anthropic';
+export type ProviderType = 'webllm' | 'native-gemini' | 'openai-compatible' | 'anthropic';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -30,6 +30,7 @@ export interface AgentAnalysis {
 
 export interface ConsensusReport {
   comprehensiveAnswer: string;
+  confidence?: 'High' | 'Medium' | 'Low' | null;
 }
 
 export interface ProviderMetadata {

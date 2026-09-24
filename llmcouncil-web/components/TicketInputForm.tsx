@@ -1,9 +1,12 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { AgentRole, type ModelQuota, type ConnectionStatus, type ProviderMetadata, type ModelCategory, type AnswerMode } from '../types';
-import { BrainCircuitIcon, PaperAirplaneIcon, ShieldIcon, InfoIcon, CloseIcon, DownloadIcon } from './icons';
+import { BrainCircuitIcon, PaperAirplaneIcon, ShieldIcon, InfoIcon, CloseIcon } from './icons';
+import { AVAILABLE_MODELS } from '../src/engine/models';
+import { BUILTIN_GEMINI_KEY } from '../services/inferenceService';
 
 export const PROVIDERS: ProviderMetadata[] = [
-  { id: 'google', name: 'Google AI Studio', baseUrl: '', logo: 'G', authType: 'native', docUrl: 'https://aistudio.google.dev' },
+  { id: 'webllm', name: 'In-Browser (WebLLM)', baseUrl: '', logo: 'W', authType: 'native', docUrl: 'https://github.com/mlc-ai/web-llm' },
+  { id: 'google', name: 'Google AI Studio', baseUrl: '', logo: 'G', authType: 'api-key', docUrl: 'https://aistudio.google.dev' },
   { id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', logo: 'O', authType: 'oauth2', docUrl: 'https://platform.openai.com' },
   { id: 'anthropic', name: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', logo: 'A', authType: 'api-key', docUrl: 'https://console.anthropic.com' },
   { id: 'xai', name: 'xAI (Grok)', baseUrl: 'https://api.x.ai/v1', logo: 'X', authType: 'api-key', docUrl: 'https://x.ai/api' },
@@ -13,34 +16,58 @@ export const PROVIDERS: ProviderMetadata[] = [
   { id: 'lmstudio', name: 'LM Studio', baseUrl: 'http://localhost:1234/v1', logo: '💻', authType: 'native', docUrl: 'https://lmstudio.ai', isLocal: true },
 ];
 
+// In-browser models need no key and no server, so they're always selectable.
+const WEBLLM_MODELS: ModelQuota[] = AVAILABLE_MODELS.map((m) => ({
+  id: m.id,
+  label: `${m.label} (in-browser)`,
+  isFree: true,
+  rpmLimit: 0,
+  description: `${m.description} Runs on your GPU via WebLLM — ${m.sizeLabel} one-time download, no API key.`,
+  providerId: 'webllm',
+  providerType: 'webllm',
+  pricingUrl: 'https://github.com/mlc-ai/web-llm',
+  connectionStatus: 'connected',
+  isSystemModel: true,
+  category: m.tier === 'fast' ? ['Local', 'Speed'] : ['Local', 'Reasoning'],
+  tags: ['in-browser', 'no-key', m.sizeLabel],
+  tokenMetric: 0,
+}));
+
+// Gemini is only usable out of the box when this build was deployed with a key;
+// otherwise it waits for the user to connect their own in the Model Hub.
+const HAS_BUILTIN_GEMINI_KEY = Boolean(BUILTIN_GEMINI_KEY);
+
 export const INITIAL_MODELS: ModelQuota[] = [
-  { 
-    id: 'gemini-3-pro-preview', 
-    label: 'Gemini 3 Pro', 
-    isFree: false, 
-    rpmLimit: 2, 
+  ...WEBLLM_MODELS,
+  {
+    id: 'gemini-3-pro-preview',
+    label: 'Gemini 3 Pro',
+    isFree: false,
+    rpmLimit: 2,
     description: 'Premier reasoning and long-context synthesis.',
     providerId: 'google',
     providerType: 'native-gemini',
     pricingUrl: 'https://ai.google.dev/pricing',
-    connectionStatus: 'connected',
-    isSystemModel: true,
+    requiresKey: !HAS_BUILTIN_GEMINI_KEY,
+    connectionStatus: HAS_BUILTIN_GEMINI_KEY ? 'connected' : 'disconnected',
+    isSystemModel: HAS_BUILTIN_GEMINI_KEY,
     category: ['Pro', 'Reasoning'],
     isNew: true,
     tokenMetric: 30,
     tags: ['native', 'thinking']
   },
-  { 
-    id: 'gemini-3-flash-preview', 
-    label: 'Gemini 3 Flash', 
-    isFree: true, 
-    rpmLimit: 15, 
+  {
+    id: 'gemini-3-flash-preview',
+    label: 'Gemini 3 Flash',
+    isFree: true,
+    rpmLimit: 15,
     description: 'Ultra-fast model optimized for real-time triage.',
     providerId: 'google',
     providerType: 'native-gemini',
     pricingUrl: 'https://ai.google.dev/pricing',
-    connectionStatus: 'connected',
-    isSystemModel: true,
+    requiresKey: !HAS_BUILTIN_GEMINI_KEY,
+    connectionStatus: HAS_BUILTIN_GEMINI_KEY ? 'connected' : 'disconnected',
+    isSystemModel: HAS_BUILTIN_GEMINI_KEY,
     category: ['Speed', 'Reasoning'],
     tokenMetric: 5,
     tags: ['native', 'fast']
@@ -183,13 +210,18 @@ interface InputPanelProps {
   onShowCancel: () => void;
   answerMode: AnswerMode;
   setAnswerMode: (m: AnswerMode) => void;
+  registry: ModelQuota[];
+  setRegistry: React.Dispatch<React.SetStateAction<ModelQuota[]>>;
 }
 
+export const isSelectableModel = (m: ModelQuota): boolean => m.connectionStatus === 'connected' || !!m.isSystemModel;
+
+const COUNCIL_SEATS = [AgentRole.Model1, AgentRole.Model2, AgentRole.Model3, AgentRole.Chairperson];
+
 const InputPanel: React.FC<InputPanelProps> = ({
-  query, setQuery, handleSubmit, handleCancel, isLoading, useAutomation, setUseAutomation, selectedModels, onModelChange, requestCounts, onShowCancel, answerMode, setAnswerMode
+  query, setQuery, handleSubmit, handleCancel, isLoading, useAutomation, setUseAutomation, selectedModels, onModelChange, requestCounts, onShowCancel, answerMode, setAnswerMode, registry, setRegistry
 }) => {
   const [activeTab, setActiveTab] = useState<'mission' | 'hub'>('mission');
-  const [registry, setRegistry] = useState<ModelQuota[]>(INITIAL_MODELS);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<ModelCategory>('All');
   const [showMegaMenu, setShowMegaMenu] = useState(false);
@@ -387,20 +419,23 @@ const InputPanel: React.FC<InputPanelProps> = ({
           />
           <div className="space-y-6">
             <div className="grid grid-cols-1 gap-4">
-              {[AgentRole.Model1, AgentRole.Model2, AgentRole.Model3].map(role => (
+              {COUNCIL_SEATS.map(role => (
                 <div key={role} className="space-y-2">
-                   <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">{role} Specialist</label>
+                   <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">{role === AgentRole.Chairperson ? 'Chairperson' : `${role} Specialist`}</label>
                    <select 
                       value={selectedModels[role]} 
                       onChange={(e) => onModelChange(role, e.target.value)}
                       className="w-full bg-slate-950/50 border border-slate-800 rounded-xl p-3 text-[11px] text-slate-200 outline-none focus:border-violet-500/50 appearance-none transition-all"
                    >
-                     {registry.filter(m => m.connectionStatus === 'connected' || m.isSystemModel).map(m => (
-                       <option key={m.id} value={m.id} className="bg-slate-900">{m.label} ({m.providerId})</option>
+                     {registry.filter(isSelectableModel).map(m => (
+                       <option key={m.id} value={m.id} className="bg-slate-900">{m.providerType === 'webllm' ? m.label : `${m.label} (${m.providerId})`}</option>
                      ))}
                    </select>
                 </div>
               ))}
+              <p className="text-[9px] text-slate-600 leading-relaxed ml-1">
+                In-browser seats run on your GPU with no API key and share one model download. Cloud models appear here once you connect a key in the Model Hub.
+              </p>
             </div>
             <button onClick={handleSubmit} disabled={isLoading || !query.trim()} className="w-full py-4.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-black rounded-[1.5rem] transition-all uppercase tracking-[0.2em] text-[11px] shadow-xl active:scale-95">
               {isLoading ? 'Signal Processing...' : 'Invoke Universal Council'}

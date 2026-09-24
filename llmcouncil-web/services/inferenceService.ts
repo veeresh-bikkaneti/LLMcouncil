@@ -1,5 +1,23 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { AgentRole, type AgentAnalysis, type TokenUsage, type ModelQuota, type AnswerMode } from '../types';
+import { AgentRole, type AgentAnalysis, type TokenUsage, type ModelQuota, type AnswerMode, type ConsensusReport } from '../types';
+import { sanitizePII } from '../src/engine/sanitize';
+import { CONFIDENCE_RULE, formatSources, GROUNDING_RULES, parseGroundedOutput } from '../src/engine/grounding';
+import type { SearchResult } from '../src/engine/types';
+
+// Only non-empty when the deployment was built with GEMINI_API_KEY set; Vite compiles
+// this to a literal `undefined` otherwise.
+export const BUILTIN_GEMINI_KEY: string = process.env.API_KEY || '';
+
+export interface LocalRunHooks {
+  /** Grounding sources, retrieved once per question and shared by every local seat. */
+  sources?: SearchResult[];
+  onProgress?: (text: string, fraction?: number) => void;
+}
+
+interface AgentResult {
+  text: string;
+  usage?: TokenUsage;
+}
 
 const extractUsage = (response: any): TokenUsage | undefined => {
   if (response.usageMetadata) {
@@ -12,9 +30,9 @@ const extractUsage = (response: any): TokenUsage | undefined => {
   return undefined;
 };
 
-const callAnthropic = async (model: ModelQuota, prompt: string): Promise<{ text: string, usage?: TokenUsage }> => {
+const callAnthropic = async (model: ModelQuota, prompt: string): Promise<AgentResult> => {
   const url = `${model.baseUrl || 'https://api.anthropic.com/v1'}/messages`;
-  
+
   if (!model.apiKey) throw new Error(`Anthropic key required for ${model.label}.`);
 
   const response = await fetch(url, {
@@ -23,7 +41,7 @@ const callAnthropic = async (model: ModelQuota, prompt: string): Promise<{ text:
       'Content-Type': 'application/json',
       'x-api-key': model.apiKey,
       'anthropic-version': '2023-06-01',
-      'dangerously-allow-browser': 'true'
+      'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
       model: model.id,
@@ -48,9 +66,9 @@ const callAnthropic = async (model: ModelQuota, prompt: string): Promise<{ text:
   };
 };
 
-const callOpenAICompatible = async (model: ModelQuota, prompt: string): Promise<{ text: string, usage?: TokenUsage }> => {
+const callOpenAICompatible = async (model: ModelQuota, prompt: string): Promise<AgentResult> => {
   const url = `${model.baseUrl || 'https://api.openai.com/v1'}/chat/completions`;
-  
+
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
   };
@@ -87,14 +105,17 @@ const callOpenAICompatible = async (model: ModelQuota, prompt: string): Promise<
   };
 };
 
-export const sanitizeText = async (query: string): Promise<{ text: string, usage?: TokenUsage }> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: `Sanitize this user input for PII (names, emails, phones). Redact sensitive info but keep intent intact. Return ONLY the sanitized version: "${query}"`
-  });
-  return { text: response.text || query, usage: extractUsage(response) };
+const geminiClient = (model: ModelQuota): GoogleGenAI => {
+  const apiKey = model.apiKey || BUILTIN_GEMINI_KEY;
+  if (!apiKey) {
+    throw new Error(`${model.label} needs a Gemini API key. Add one in the Model Hub, or pick an in-browser model.`);
+  }
+  return new GoogleGenAI({ apiKey });
 };
+
+// On-device and synchronous. This used to be a Gemini call, which meant sending the
+// raw, unscrubbed query to a cloud API in order to "protect" it.
+export const sanitizeText = (query: string): { text: string } => ({ text: sanitizePII(query) });
 
 const getAgentPrompt = (role: AgentRole, query: string): string => {
   switch (role) {
@@ -105,15 +126,62 @@ const getAgentPrompt = (role: AgentRole, query: string): string => {
   }
 };
 
-export const analyzeWithAgent = async (role: AgentRole, query: string, model: ModelQuota, mode: AnswerMode): Promise<{ text: string, usage?: TokenUsage }> => {
+const LOCAL_PERSONA: Partial<Record<AgentRole, string>> = {
+  [AgentRole.Model1]: 'You are Model 1 on an LLM council, the Factualist: give a direct, precise, data-driven answer.',
+  [AgentRole.Model2]: 'You are Model 2 on an LLM council, the Analyst: reason step by step through the question and its implications.',
+  [AgentRole.Model3]: 'You are Model 3 on an LLM council, the Strategist: offer an alternative, multi-perspective framing of the question.',
+};
+
+// Small in-browser models ramble without a cap, and the Council runs four of these
+// generations back to back on one engine.
+const LOCAL_MAX_TOKENS: Record<AnswerMode, number> = { simple: 320, complex: 900 };
+
+const runLocal = async (
+  model: ModelQuota,
+  systemPrompt: string,
+  userPrompt: string,
+  mode: AnswerMode,
+  hooks?: LocalRunHooks
+): Promise<string> => {
+  // Dynamic import keeps the ~6MB WebLLM runtime out of the main bundle until an
+  // in-browser model is actually used.
+  const { generate } = await import('../src/engine/engineManager');
+  return generate(
+    model.id,
+    [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+    { temperature: 0, maxTokens: LOCAL_MAX_TOKENS[mode], onProgress: hooks?.onProgress }
+  );
+};
+
+export const analyzeWithAgent = async (
+  role: AgentRole,
+  query: string,
+  model: ModelQuota,
+  mode: AnswerMode,
+  hooks?: LocalRunHooks
+): Promise<AgentResult> => {
+  if (model.providerType === 'webllm') {
+    const systemPrompt = [
+      LOCAL_PERSONA[role] ?? 'You are a member of an LLM council.',
+      GROUNDING_RULES,
+      `SOURCES:\n${formatSources(hooks?.sources ?? [])}`,
+    ].join('\n\n');
+    const { answer } = parseGroundedOutput(await runLocal(model, systemPrompt, query, mode, hooks));
+    if (!answer) throw new Error(`${model.label} returned an empty answer.`);
+    return { text: answer };
+  }
+
   const prompt = getAgentPrompt(role, query);
-  
+  let result: AgentResult;
+
   if (model.providerType === 'native-gemini') {
-    const apiKey = model.apiKey || process.env.API_KEY!;
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = geminiClient(model);
     const isPro = model.id.includes('pro');
     const isFlash = model.id.includes('flash');
-    
+
     // Configure thinking budget based on answer mode
     let thinkingBudget = 0;
     if (mode === 'complex') {
@@ -128,33 +196,72 @@ export const analyzeWithAgent = async (role: AgentRole, query: string, model: Mo
       config: thinkingBudget > 0 ? { thinkingConfig: { thinkingBudget } } : {}
     });
     if (!response.text) throw new Error(`Agent ${role} link interrupted.`);
-    return { text: response.text, usage: extractUsage(response) };
+    result = { text: response.text, usage: extractUsage(response) };
   } else if (model.providerType === 'anthropic') {
-    return await callAnthropic(model, prompt);
+    result = await callAnthropic(model, prompt);
   } else {
-    return await callOpenAICompatible(model, prompt);
+    result = await callOpenAICompatible(model, prompt);
   }
+
+  return { ...result, text: sanitizePII(result.text) };
 };
 
-export const synthesizeConsensus = async (query: string, analyses: AgentAnalysis[], mode: AnswerMode): Promise<{ text: string, usage?: TokenUsage }> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+export const synthesizeConsensus = async (
+  query: string,
+  analyses: AgentAnalysis[],
+  mode: AnswerMode,
+  chairModel: ModelQuota,
+  hooks?: LocalRunHooks
+): Promise<{ report: ConsensusReport; usage?: TokenUsage }> => {
   const perspectives = analyses.map(a => `## [${a.role} (${a.modelName})]\n${a.analysis}`).join('\n\n');
-  
-  const thinkingBudget = mode === 'complex' ? 32768 : 0;
+  const instruction = `Arbitrate and synthesize these multi-agent deliberations into a single superior consensus for: "${query}"`;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
-    contents: `Arbitrate and synthesize these multi-agent deliberations into a single superior consensus for: "${query}"\n\n${perspectives}`,
-    config: {
-      thinkingConfig: thinkingBudget > 0 ? { thinkingBudget } : undefined,
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: { comprehensiveAnswer: { type: Type.STRING } },
-        required: ['comprehensiveAnswer'],
-      }
-    },
-  });
-  
-  return { text: response.text || "{}", usage: extractUsage(response) };
+  if (chairModel.providerType === 'webllm') {
+    const systemPrompt = [
+      "You are the Chairperson of an LLM council. Reconcile the members' perspectives into one answer, " +
+        'resolving any disagreement in favour of what the sources support.',
+      GROUNDING_RULES,
+      CONFIDENCE_RULE,
+      `SOURCES:\n${formatSources(hooks?.sources ?? [])}`,
+    ].join('\n\n');
+    const raw = await runLocal(chairModel, systemPrompt, `${instruction}\n\n${perspectives}`, mode, hooks);
+    const { answer, confidence } = parseGroundedOutput(raw);
+    if (!answer) throw new Error(`${chairModel.label} returned an empty synthesis.`);
+    return { report: { comprehensiveAnswer: answer, confidence } };
+  }
+
+  if (chairModel.providerType === 'native-gemini') {
+    const ai = geminiClient(chairModel);
+    const thinkingBudget = mode === 'complex' ? 32768 : 0;
+    const response = await ai.models.generateContent({
+      model: chairModel.id,
+      contents: `${instruction}\n\n${perspectives}`,
+      config: {
+        thinkingConfig: thinkingBudget > 0 ? { thinkingBudget } : undefined,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: { comprehensiveAnswer: { type: Type.STRING } },
+          required: ['comprehensiveAnswer'],
+        }
+      },
+    });
+
+    let parsed: ConsensusReport;
+    try {
+      parsed = JSON.parse(response.text || '{}');
+    } catch {
+      throw new Error('Arbitration failed: invalid synthesis format.');
+    }
+    if (!parsed.comprehensiveAnswer) throw new Error('Arbitration failed: empty synthesis.');
+    return {
+      report: { comprehensiveAnswer: sanitizePII(parsed.comprehensiveAnswer) },
+      usage: extractUsage(response),
+    };
+  }
+
+  const result = chairModel.providerType === 'anthropic'
+    ? await callAnthropic(chairModel, `${instruction}\n\n${perspectives}`)
+    : await callOpenAICompatible(chairModel, `${instruction}\n\n${perspectives}`);
+  return { report: { comprehensiveAnswer: sanitizePII(result.text) }, usage: result.usage };
 };
