@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { AgentRole, type ModelQuota, type ConnectionStatus, type ProviderMetadata, type ModelCategory, type AnswerMode } from '../types';
 import { BrainCircuitIcon, PaperAirplaneIcon, ShieldIcon, InfoIcon, CloseIcon } from './icons';
-import { AVAILABLE_MODELS } from '../src/engine/models';
+import { AVAILABLE_MODELS, fitsDevice } from '../src/engine/models';
 import { BUILTIN_GEMINI_KEY } from '../services/inferenceService';
 
 export const PROVIDERS: ProviderMetadata[] = [
@@ -16,8 +16,9 @@ export const PROVIDERS: ProviderMetadata[] = [
   { id: 'lmstudio', name: 'LM Studio', baseUrl: 'http://localhost:1234/v1', logo: '💻', authType: 'native', docUrl: 'https://lmstudio.ai', isLocal: true },
 ];
 
-// In-browser models need no key and no server, so they're always selectable.
-const WEBLLM_MODELS: ModelQuota[] = AVAILABLE_MODELS.map((m) => ({
+// In-browser models need no key and no server, so they're always selectable, except
+// ones too large for this device's GPU memory, which would crash the tab on load.
+const WEBLLM_MODELS: ModelQuota[] = AVAILABLE_MODELS.filter(fitsDevice).map((m) => ({
   id: m.id,
   label: `${m.label} (in-browser)`,
   isFree: true,

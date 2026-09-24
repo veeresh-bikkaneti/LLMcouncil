@@ -5,6 +5,7 @@ import {
   AVAILABLE_MODELS,
   DEFAULT_MODEL_ID,
 } from '../src/engine/chatbot';
+import { fitsDevice, getDeviceProfile } from '../src/engine/models';
 import type { ConfidenceLevel, EngineModelOption, ModelCapability, ModelTier, SearchResult } from '../src/engine/types';
 import { sanitizePII } from '../src/engine/sanitize';
 import GroundingDrawer from './GroundingDrawer';
@@ -121,20 +122,24 @@ const CitedText: React.FC<{ text: string }> = ({ text }) => {
   );
 };
 
-const ModelCard: React.FC<{ model: EngineModelOption; selected: boolean; onSelect: () => void }> = ({
+const ModelCard: React.FC<{ model: EngineModelOption; selected: boolean; fits: boolean; onSelect: () => void }> = ({
   model,
   selected,
+  fits,
   onSelect,
 }) => (
   <button
     onClick={onSelect}
+    disabled={!fits}
     className={`relative text-left w-full rounded-[1.375rem] p-6 flex flex-col gap-4 transition-all bg-gradient-to-b to-transparent ${
-      selected
+      !fits
+        ? 'opacity-40 cursor-not-allowed from-white/[0.02] bg-[#0b0d15] border border-white/[0.06]'
+        : selected
         ? '-translate-y-1.5 from-violet-500/10 bg-[#0d0b18] border border-violet-500/45 shadow-[0_0_0_1px_rgba(139,92,246,0.15),0_24px_48px_-20px_rgba(124,58,237,0.45)]'
         : 'from-white/[0.035] bg-[#0b0d15] border border-white/[0.08] shadow-[0_20px_36px_-26px_rgba(0,0,0,0.7)] hover:border-white/20'
     }`}
   >
-    {model.recommended && (
+    {model.id === DEFAULT_MODEL_ID && (
       <span className="absolute -top-3 right-6 bg-gradient-to-b from-violet-400 to-violet-600 text-white text-[9px] font-extrabold uppercase tracking-widest px-3.5 py-1.5 rounded-full shadow-[0_8px_16px_-6px_rgba(124,58,237,0.7)]">
         Recommended
       </span>
@@ -153,12 +158,14 @@ const ModelCard: React.FC<{ model: EngineModelOption; selected: boolean; onSelec
     <p className="text-[12.5px] text-slate-500 leading-relaxed">{model.description}</p>
     <div
       className={`mt-1 text-center py-2.5 rounded-xl text-[11px] font-extrabold uppercase tracking-widest ${
-        selected
-          ? 'bg-gradient-to-b from-violet-400 to-violet-600 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.25)]'
-          : 'border border-white/10 text-slate-300'
+        !fits
+          ? 'border border-white/10 text-slate-500'
+          : selected
+            ? 'bg-gradient-to-b from-violet-400 to-violet-600 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.25)]'
+            : 'border border-white/10 text-slate-300'
       }`}
     >
-      {selected ? 'Selected' : 'Select'}
+      {!fits ? 'Too large for this device' : selected ? 'Selected' : 'Select'}
     </div>
   </button>
 );
@@ -352,6 +359,12 @@ const GroundedAssistant: React.FC = () => {
               what you'd get from Chrome's in-browser AI Mode — pick one that fits your hardware. No cloud API
               key is required for any tier.
             </p>
+            {getDeviceProfile().constrained && (
+              <p className="text-[12.5px] text-amber-300/90 leading-relaxed">
+                This looks like a phone or tablet. Only models that fit in its browser memory can be selected;
+                larger ones would crash the tab.
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2.5 bg-white/[0.04] border border-white/[0.09] rounded-full pl-4 pr-5 py-2.5 flex-shrink-0">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_0_3px_rgba(52,211,153,0.18)]" />
@@ -367,7 +380,13 @@ const GroundedAssistant: React.FC = () => {
                 <div className="h-px bg-gradient-to-r from-white/15 to-transparent" />
               </div>
               {AVAILABLE_MODELS.filter((m) => m.tier === tier).map((m) => (
-                <ModelCard key={m.id} model={m} selected={modelId === m.id} onSelect={() => setModelId(m.id)} />
+                <ModelCard
+                  key={m.id}
+                  model={m}
+                  selected={modelId === m.id}
+                  fits={fitsDevice(m)}
+                  onSelect={() => setModelId(m.id)}
+                />
               ))}
               {tier === 'deep' && (
                 <p className="text-[9.5px] text-slate-600 leading-relaxed">
