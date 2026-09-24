@@ -64,6 +64,11 @@ interface EngineProgress {
 }
 
 const App: React.FC = () => {
+  // Checked once: a browser's WebGPU support doesn't change during a session. Shown
+  // proactively (not just as a submit-time error) since Quick -- the zero-cloud-key
+  // default a first-time visitor lands on -- otherwise gives no hint until they've
+  // already typed a question and hit submit.
+  const [webgpuOk] = useState<boolean>(() => isWebGPUSupported());
   // Default to Quick: the whole point of that mode is a single answer with zero
   // cloud API key, so that's what a first-time visitor should land on.
   const [mode, setMode] = useState<AppMode>(() => {
@@ -80,6 +85,9 @@ const App: React.FC = () => {
   const [answerMode, setAnswerMode] = useState<AnswerMode>('complex');
   const [sources, setSources] = useState<SearchResult[]>([]);
   const [engineProgress, setEngineProgress] = useState<EngineProgress | null>(null);
+  // Quick mode's in-browser answer streams token-by-token, same as the old Local
+  // Assistant did; Council seats never streamed to the UI, so this stays empty there.
+  const [streamingText, setStreamingText] = useState('');
   // Each run takes a new id; a run whose id is no longer current (aborted, or
   // superseded by a newer run) must not touch state, so its late results can never
   // overwrite a newer run's.
@@ -137,6 +145,7 @@ const App: React.FC = () => {
     setConsensus(null);
     setSources([]);
     setEngineProgress(null);
+    setStreamingText('');
     setAgentAnalyses(prev => prev.map(a => ({ ...a, status: 'idle', analysis: '', usage: undefined })));
     const runId = ++runIdRef.current;
     const isStale = () => runIdRef.current !== runId;
@@ -178,6 +187,10 @@ const App: React.FC = () => {
         runEpoch,
         onProgress: (text, fraction) => {
           if (!isStale()) setEngineProgress(fraction !== undefined && fraction >= 1 ? null : { text, fraction });
+        },
+        // Only ever invoked by answerDirectly (Quick mode); Council seats don't stream.
+        onToken: (delta) => {
+          if (!isStale()) setStreamingText(prev => prev + delta);
         },
       };
 
@@ -310,7 +323,7 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-6 flex-wrap justify-center">
-             <ModeSwitcher mode={mode} onChange={setMode} />
+             <ModeSwitcher mode={mode} onChange={setMode} disabled={isLoading} />
              <div className="hidden lg:flex items-center gap-3 bg-slate-900/60 px-6 py-2.5 rounded-2xl border border-slate-800 shadow-xl backdrop-blur-md">
                 <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Gateway Ready</span>
@@ -348,6 +361,18 @@ const App: React.FC = () => {
                 />
               </div>
               <div className="lg:col-span-3 space-y-20 min-w-0">
+                {!webgpuOk && (
+                  <div className="bg-amber-500/5 border border-amber-500/20 rounded-[2rem] p-8 flex items-start gap-4">
+                    <div className="w-2 h-2 mt-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                    <div>
+                      <p className="text-[11px] font-black uppercase tracking-widest text-amber-400 mb-1.5">WebGPU Unavailable</p>
+                      <p className="text-sm text-amber-200/70 leading-relaxed">
+                        This browser can't run in-browser models. Use a recent desktop Chrome or Edge, or connect a
+                        cloud model with your own API key in the Model Hub.
+                      </p>
+                    </div>
+                  </div>
+                )}
                 {error && (
                   <div className="bg-rose-500/5 border border-rose-500/20 rounded-[2rem] p-8 flex items-start gap-4">
                     <div className="w-2 h-2 mt-1.5 rounded-full bg-rose-500 flex-shrink-0" />
@@ -389,6 +414,7 @@ const App: React.FC = () => {
                   agentAnalyses={agentAnalyses}
                   chairModelLabel={primaryModelLabel}
                   sources={sources}
+                  streamingText={streamingText}
                 />
               </div>
             </main>

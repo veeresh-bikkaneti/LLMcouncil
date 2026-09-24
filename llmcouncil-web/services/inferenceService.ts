@@ -14,6 +14,10 @@ export interface LocalRunHooks {
   /** Grounding sources, retrieved once per question and shared by every local seat. */
   sources?: SearchResult[];
   onProgress?: (text: string, fraction?: number) => void;
+  /** Streamed token-by-token as an in-browser model generates. Only answerDirectly
+   *  (Quick mode) uses this -- Council seats never streamed to the UI even before
+   *  the merge, so leaving it unset there is not a behavior change. */
+  onToken?: (delta: string) => void;
   /**
    * The cancellation epoch captured once when the run started, not per seat. Council
    * seats now run sequentially (one shared engine can only run one at a time), so if
@@ -191,6 +195,7 @@ const runLocal = async (
       temperature: 0,
       maxTokens: LOCAL_MAX_TOKENS[mode],
       onProgress: hooks?.onProgress,
+      onToken: hooks?.onToken,
       onModelResolved: (id) => { resolvedModelId = id; },
       excludeModelIds,
     }

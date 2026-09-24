@@ -16,6 +16,10 @@ interface ConsensusDashboardProps {
   agentAnalyses: AgentAnalysis[];
   chairModelLabel: string;
   sources: SearchResult[];
+  /** Quick mode's in-browser answer streaming in as it generates; shown in place of
+   *  the plain "thinking" shimmer once at least one token has arrived. Council seats
+   *  never stream, so this stays empty and the shimmer-only view is unaffected. */
+  streamingText?: string;
 }
 
 const CONFIDENCE_STYLE: Record<'High' | 'Medium' | 'Low', string> = {
@@ -46,7 +50,7 @@ const STATUS_STYLE: Record<AgentAnalysis['status'], string> = {
   error: 'text-amber-500 border-amber-500/30 bg-amber-500/5',
 };
 
-const ConsensusDashboard: React.FC<ConsensusDashboardProps> = ({ variant, consensus, chairpersonStatus, chairpersonUsage, originalQuery, agentAnalyses, chairModelLabel, sources }) => {
+const ConsensusDashboard: React.FC<ConsensusDashboardProps> = ({ variant, consensus, chairpersonStatus, chairpersonUsage, originalQuery, agentAnalyses, chairModelLabel, sources, streamingText }) => {
   const modelName = chairModelLabel;
 
   const handleDownload = () => {
@@ -109,6 +113,16 @@ const ConsensusDashboard: React.FC<ConsensusDashboardProps> = ({ variant, consen
       );
     }
     if (chairpersonStatus === 'thinking') {
+      if (variant === 'quick' && streamingText) {
+        return (
+          <div className="bg-slate-950/70 p-10 rounded-[2.5rem] border border-violet-500/20 shadow-[0_0_50px_rgba(0,0,0,0.3)]">
+            <span className="inline-flex items-center gap-2 mb-6 text-[10px] font-black uppercase tracking-widest text-violet-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" /> Writing
+            </span>
+            <Markdown text={streamingText} />
+          </div>
+        );
+      }
       return (
         <div className="flex flex-col items-center gap-10 py-16 px-10 text-slate-400 bg-slate-900/20 rounded-[2rem] border border-violet-500/20">
           <div className="relative">
@@ -141,7 +155,7 @@ const ConsensusDashboard: React.FC<ConsensusDashboardProps> = ({ variant, consen
       return (
         <div className="bg-slate-950/70 p-10 rounded-[2.5rem] border border-slate-800/80 shadow-[0_0_50px_rgba(0,0,0,0.3)] animate-fade-in relative overflow-hidden group">
             <div className="absolute top-0 right-0 p-8 opacity-[0.03] group-hover:opacity-10 transition-all duration-700">
-                <ChairpersonIcon className="w-56 h-56" />
+                {variant === 'quick' ? <BrainCircuitIcon className="w-56 h-56" /> : <ChairpersonIcon className="w-56 h-56" />}
             </div>
             <div className="relative z-10">
                 {consensus.confidence && (
