@@ -8,12 +8,14 @@ export interface SearchResult {
   /** Trimmed, plain-text excerpt used as grounding context for the model. */
   content: string;
   /** Which connector produced this result, surfaced in the grounding inspection panel. */
-  source: 'tavily' | 'brave' | 'wikipedia';
+  source: 'tavily' | 'brave' | 'wikipedia' | 'duckduckgo';
 }
 
 export type ConfidenceLevel = 'High' | 'Medium' | 'Low';
 
 export type SearchProvider = 'auto' | 'tavily' | 'brave' | 'wikipedia';
+// duckduckgo isn't user-selectable: it's only ever an automatic fallback alongside
+// Wikipedia when there's no search key, not a provider someone opts into.
 
 export interface SearchOptions {
   /** Optional cloud search API key (Tavily or Brave). Omit to use the keyless Wikipedia fallback. */

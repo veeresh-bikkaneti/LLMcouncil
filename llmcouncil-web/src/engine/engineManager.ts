@@ -5,7 +5,7 @@ import {
   type InitProgressReport,
   type MLCEngineInterface,
 } from '@mlc-ai/web-llm';
-import { AVAILABLE_MODELS, fitsDevice, getDeviceProfile, isWebGPUSupported, localContextTokens } from './models';
+import { AVAILABLE_MODELS, fitsDevice, getDeviceProfile, isWebGPUSupported, localContextTokens, nextSmaller } from './models';
 import { currentEpoch, GenerationCancelledError, setInterruptHook, type CancelScope } from './cancellation';
 
 export { GenerationCancelledError } from './cancellation';
@@ -46,6 +46,32 @@ const GPU_LOSS_RE =
 function isGpuLoss(e: unknown): boolean {
   const err = e as Error;
   return err?.name === 'DeviceLostError' || GPU_LOSS_RE.test(err?.message || String(e));
+}
+
+/** Thrown by the pre-download device-memory check; distinct from other load failures
+ *  so the caller knows retrying with a *smaller* model is the sensible response. */
+export class DeviceTooSmallError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DeviceTooSmallError';
+  }
+}
+
+/** Thrown when the GPU itself rejects or loses a model while CreateMLCEngine is
+ *  actually running. Unlike DeviceTooSmallError's static, deterministic check, this
+ *  can be a one-off hiccup, so ensureEngine gives the same model one retry first. */
+export class GpuLoadFailedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GpuLoadFailedError';
+  }
+}
+
+/** Whether trying a smaller model is a reasonable response to this failure. A plain
+ *  network/fetch error or "no GPU adapter at all" isn't -- a smaller download or a
+ *  smaller model doesn't fix either of those. */
+function isStepDownWorthy(e: unknown): boolean {
+  return e instanceof DeviceTooSmallError || e instanceof GpuLoadFailedError;
 }
 
 const gpuLostMessage = (retried: boolean) =>
@@ -95,45 +121,36 @@ async function discardEngine(): Promise<void> {
   }
 }
 
-async function ensureEngine(modelId: string, onProgress?: ProgressFn): Promise<MLCEngineInterface> {
-  if (engine && engineModelId === modelId) return engine;
-  if (!isWebGPUSupported()) {
-    throw new Error(
-      'WebGPU is not available in this browser, so in-browser models cannot run. Use a recent ' +
-        'desktop Chrome or Edge, or connect a cloud model with your own API key in the Model Hub.'
-    );
-  }
-
+/** One attempt to load exactly `modelId`. Throws DeviceTooSmallError for the static
+ *  pre-download check so the caller can decide whether stepping down makes sense. */
+async function loadOnce(modelId: string, onProgress?: ProgressFn): Promise<MLCEngineInterface> {
   const build = await resolveBuild(modelId);
   // Checked before anything is downloaded or allocated: exceeding the device's GPU
   // memory kills the whole tab, which no error handler can recover from.
   const { maxVramMB } = getDeviceProfile();
   if (build.vramMB !== undefined && build.vramMB > maxVramMB) {
     const label = AVAILABLE_MODELS.find((m) => m.id === modelId)?.label ?? modelId;
-    const alternatives = AVAILABLE_MODELS.filter((m) => m.id !== modelId && fitsDevice(m)).map((m) => m.label);
-    throw new Error(
-      `${label} needs about ${(build.vramMB / 1024).toFixed(1)} GB of GPU memory, more than this device ` +
-        'can give a browser tab. ' +
-        (alternatives.length ? `Pick ${alternatives.join(' or ')} instead.` : 'Connect a cloud model in the Model Hub instead.')
+    throw new DeviceTooSmallError(
+      `${label} needs about ${(build.vramMB / 1024).toFixed(1)} GB of GPU memory, more than this device can give a browser tab.`
     );
   }
 
   await discardEngine();
 
   try {
-    engine = await CreateMLCEngine(
+    const loaded = await CreateMLCEngine(
       build.id,
       { initProgressCallback: (report: InitProgressReport) => onProgress?.(report.text, report.progress) },
       // Only ever shrinks the window (on phones); the prompt budgets follow the same value.
       { context_window_size: localContextTokens() }
     );
+    engine = loaded;
+    engineModelId = modelId;
+    return loaded;
   } catch (e) {
     const detail = (e as Error).message || String(e);
     if (isGpuLoss(e) || /out of memory/i.test(detail)) {
-      throw new Error(
-        'The GPU ran out of memory loading this model. Pick a smaller model (Llama 3.2 1B or ' +
-          'Qwen2.5 0.5B on phones), close other tabs, and try again.'
-      );
+      throw new GpuLoadFailedError('The GPU ran out of memory loading this model.');
     }
     if (/fetch/i.test(detail)) {
       throw new Error(
@@ -143,14 +160,81 @@ async function ensureEngine(modelId: string, onProgress?: ProgressFn): Promise<M
     }
     throw e;
   }
-  engineModelId = modelId;
-  return engine;
 }
 
-/** Loads (or reuses) a model without generating anything. */
-export function loadModel(modelId: string, onProgress?: ProgressFn): Promise<void> {
+/**
+ * Loads `modelId`, stepping down to progressively smaller models on a
+ * capability-related failure (declared-too-big, or the GPU actually rejecting or
+ * losing it under load) until one loads or nothing smaller is left to try. Which
+ * model actually ends up loaded can differ from what was asked for; `onResolved`
+ * reports it so the caller can reflect that in the UI instead of silently
+ * mismatching what's shown against what's really running.
+ */
+async function ensureEngine(
+  modelId: string,
+  onProgress?: ProgressFn,
+  onResolved?: (resolvedModelId: string) => void,
+  // Models other seats in the same Council run already resolved to. Only consulted
+  // when *stepping down* (never blocks the first attempt at `modelId` itself, which
+  // may deliberately be a seat the user set to match another one -- that's their
+  // call, already flagged by the UI's diversity hint), so an automatic step-down
+  // never has two seats silently converge on the same model.
+  excludeModelIds?: ReadonlySet<string>
+): Promise<MLCEngineInterface> {
+  if (engine && engineModelId === modelId) {
+    onResolved?.(modelId);
+    return engine;
+  }
+  if (!isWebGPUSupported()) {
+    throw new Error(
+      'WebGPU is not available in this browser, so in-browser models cannot run. Use a recent ' +
+        'desktop Chrome or Edge, or connect a cloud model with your own API key in the Model Hub.'
+    );
+  }
+
+  const tried = new Set<string>(excludeModelIds);
+  const retriedOnce = new Set<string>();
+  let candidateId = modelId;
+  for (;;) {
+    tried.add(candidateId);
+    try {
+      const loaded = await loadOnce(candidateId, onProgress);
+      onResolved?.(candidateId);
+      return loaded;
+    } catch (e) {
+      if (!isStepDownWorthy(e)) throw e;
+      // The static "too big" check is deterministic -- retrying the same model can't
+      // change its answer. A GPU rejecting or losing a model during load might be a
+      // one-off hiccup though, so give it one retry before giving up on it, the same
+      // grace generate() already gives a loss mid-stream.
+      if (e instanceof GpuLoadFailedError && !retriedOnce.has(candidateId)) {
+        retriedOnce.add(candidateId);
+        continue;
+      }
+      const next = nextSmaller(candidateId, tried);
+      if (!next) {
+        const label = AVAILABLE_MODELS.find((m) => m.id === modelId)?.label ?? modelId;
+        throw new Error(
+          `No in-browser model that fits this device could be loaded (started from ${label}). ` +
+            'Add your own API key for a cloud model in the Model Hub instead.'
+        );
+      }
+      const fromLabel = AVAILABLE_MODELS.find((m) => m.id === candidateId)?.label ?? candidateId;
+      onProgress?.(`${fromLabel} didn't work on this device -- trying ${next.label} instead...`, 0);
+      candidateId = next.id;
+    }
+  }
+}
+
+/** Loads (or reuses) a model without generating anything. Resolves to the model id
+ *  actually loaded, which can be smaller than `modelId` (see ensureEngine). */
+export function loadModel(modelId: string, onProgress?: ProgressFn): Promise<string> {
   return enqueue(async () => {
-    await ensureEngine(modelId, onProgress);
+    let resolved = modelId;
+    await ensureEngine(modelId, onProgress, (id) => {
+      resolved = id;
+    });
+    return resolved;
   });
 }
 
@@ -163,6 +247,12 @@ export interface GenerateOptions {
   maxTokens?: number;
   onToken?: (delta: string) => void;
   onProgress?: ProgressFn;
+  /** Called once with the model actually loaded, which can differ from `modelId`
+   *  passed to generate() if that one didn't fit this device (see ensureEngine). */
+  onModelResolved?: (resolvedModelId: string) => void;
+  /** Models other seats in this run already resolved to, so an automatic step-down
+   *  never lands this seat on the same model as one of them (see ensureEngine). */
+  excludeModelIds?: ReadonlySet<string>;
 }
 
 /** Loads the model if needed, then streams one completion. Returns the full text. */
@@ -180,7 +270,7 @@ export function generate(
     // which would show the start of the answer twice.
     for (let attempt = 0; ; attempt++) {
       if (cancelled()) throw new GenerationCancelledError();
-      const active = await ensureEngine(modelId, opts.onProgress);
+      const active = await ensureEngine(modelId, opts.onProgress, opts.onModelResolved, opts.excludeModelIds);
       // A model download can take minutes; the run may have been aborted meanwhile.
       if (cancelled()) throw new GenerationCancelledError();
 

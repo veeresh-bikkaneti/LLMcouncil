@@ -87,6 +87,7 @@ const SOURCE_AVATAR: Record<SearchResult['source'], { letter: string; classes: s
   wikipedia: { letter: 'W', classes: 'bg-emerald-500/15 text-emerald-300' },
   tavily: { letter: 'T', classes: 'bg-violet-500/15 text-violet-300' },
   brave: { letter: 'B', classes: 'bg-amber-500/15 text-amber-300' },
+  duckduckgo: { letter: 'D', classes: 'bg-orange-500/15 text-orange-300' },
 };
 
 const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -281,6 +282,10 @@ const GroundedAssistant: React.FC = () => {
         if (typeof fraction === 'number') setProgressFraction(fraction);
       });
       botRef.current = bot;
+      // The engine may have stepped down to a smaller model than selected, if this
+      // one didn't fit the device (see engineManager's step-down ladder). Reflect
+      // whatever actually loaded rather than what was picked.
+      if (bot.getModelId() !== modelId) setModelId(bot.getModelId());
       setTurns([]);
       setStatus('ready');
     } catch (e) {

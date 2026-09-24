@@ -14,11 +14,24 @@ export interface LocalRunHooks {
   /** Grounding sources, retrieved once per question and shared by every local seat. */
   sources?: SearchResult[];
   onProgress?: (text: string, fraction?: number) => void;
+  /**
+   * The cancellation epoch captured once when the run started, not per seat. Council
+   * seats now run sequentially (one shared engine can only run one at a time), so if
+   * this were captured fresh inside each seat's own call, an abort during an earlier
+   * seat would go undetected by a later one -- it would capture the already-bumped
+   * epoch as if it were current and run to completion anyway. Falls back to reading
+   * the current epoch live for any caller that doesn't set it (e.g. a single-shot
+   * call outside a multi-seat run, where there's no "earlier seat" to race against).
+   */
+  runEpoch?: number;
 }
 
 interface AgentResult {
   text: string;
   usage?: TokenUsage;
+  /** The model actually used, if it differs from the one the seat was set to (see
+   *  engineManager's step-down ladder). Only ever set for webllm results. */
+  resolvedModelId?: string;
 }
 
 const extractUsage = (response: any): TokenUsage | undefined => {
@@ -155,22 +168,34 @@ const runLocal = async (
   systemPrompt: string,
   userPrompt: string,
   mode: AnswerMode,
-  hooks?: LocalRunHooks
-): Promise<string> => {
-  // Captured before the import: on a cold cache the engine chunk can take a while to
-  // arrive, and an abort in the meantime must still cancel this generation.
-  const epoch = currentEpoch('council');
+  hooks?: LocalRunHooks,
+  excludeModelIds?: ReadonlySet<string>
+): Promise<{ text: string; resolvedModelId: string }> => {
+  // hooks.runEpoch is captured once for the whole run, before any seat starts; see
+  // its doc comment for why that matters for sequential seats. The live fallback
+  // covers a caller with no run-level hooks at all.
+  const epoch = hooks?.runEpoch ?? currentEpoch('council');
   // Dynamic import keeps the ~6MB WebLLM runtime out of the main bundle until an
   // in-browser model is actually used.
   const { generate } = await import('../src/engine/engineManager');
-  return generate(
+  let resolvedModelId = model.id;
+  const text = await generate(
     model.id,
     [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
-    { scope: 'council', epoch, temperature: 0, maxTokens: LOCAL_MAX_TOKENS[mode], onProgress: hooks?.onProgress }
+    {
+      scope: 'council',
+      epoch,
+      temperature: 0,
+      maxTokens: LOCAL_MAX_TOKENS[mode],
+      onProgress: hooks?.onProgress,
+      onModelResolved: (id) => { resolvedModelId = id; },
+      excludeModelIds,
+    }
   );
+  return { text, resolvedModelId };
 };
 
 export const analyzeWithAgent = async (
@@ -178,7 +203,10 @@ export const analyzeWithAgent = async (
   query: string,
   model: ModelQuota,
   mode: AnswerMode,
-  hooks?: LocalRunHooks
+  hooks?: LocalRunHooks,
+  // Models earlier seats in this Council run already resolved to, so this seat's
+  // own step-down (if it needs one) never lands on the same model as one of them.
+  excludeModelIds?: ReadonlySet<string>
 ): Promise<AgentResult> => {
   if (model.providerType === 'webllm') {
     const budget = localBudget(query, mode);
@@ -187,9 +215,10 @@ export const analyzeWithAgent = async (
       GROUNDING_RULES,
       `SOURCES:\n${formatSources(hooks?.sources ?? [], budget.remaining)}`,
     ].join('\n\n');
-    const { answer } = parseGroundedOutput(await runLocal(model, systemPrompt, budget.query, mode, hooks));
+    const { text: raw, resolvedModelId } = await runLocal(model, systemPrompt, budget.query, mode, hooks, excludeModelIds);
+    const { answer } = parseGroundedOutput(raw);
     if (!answer) throw new Error(`${model.label} returned an empty answer.`);
-    return { text: answer };
+    return { text: answer, resolvedModelId: resolvedModelId !== model.id ? resolvedModelId : undefined };
   }
 
   const prompt = getAgentPrompt(role, query);
@@ -230,7 +259,7 @@ export const synthesizeConsensus = async (
   mode: AnswerMode,
   chairModel: ModelQuota,
   hooks?: LocalRunHooks
-): Promise<{ report: ConsensusReport; usage?: TokenUsage }> => {
+): Promise<{ report: ConsensusReport; usage?: TokenUsage; resolvedModelId?: string }> => {
   const perspectives = analyses.map(a => `## [${a.role} (${a.modelName})]\n${a.analysis}`).join('\n\n');
   const instruction = `Arbitrate and synthesize these multi-agent deliberations into a single superior consensus for: "${query}"`;
 
@@ -251,10 +280,17 @@ export const synthesizeConsensus = async (
       `SOURCES:\n${formatSources(hooks?.sources ?? [], sourceChars)}`,
     ].join('\n\n');
     const localInstruction = `Arbitrate and synthesize these multi-agent deliberations into a single superior consensus for: "${budget.query}"`;
-    const raw = await runLocal(chairModel, systemPrompt, `${localInstruction}\n\n${localPerspectives}`, mode, hooks);
+    // The members' resolved models (not necessarily what they were originally set
+    // to, if any of them stepped down) are excluded so the chair never converges on
+    // one of them if it needs to step down itself.
+    const memberModelIds = new Set(analyses.map((a) => a.modelName));
+    const { text: raw, resolvedModelId } = await runLocal(chairModel, systemPrompt, `${localInstruction}\n\n${localPerspectives}`, mode, hooks, memberModelIds);
     const { answer, confidence } = parseGroundedOutput(raw);
     if (!answer) throw new Error(`${chairModel.label} returned an empty synthesis.`);
-    return { report: { comprehensiveAnswer: answer, confidence } };
+    return {
+      report: { comprehensiveAnswer: answer, confidence },
+      resolvedModelId: resolvedModelId !== chairModel.id ? resolvedModelId : undefined,
+    };
   }
 
   if (chairModel.providerType === 'native-gemini') {

@@ -203,6 +203,26 @@ function pickForDevice(preferred: string): string {
   return [...AVAILABLE_MODELS].sort((a, b) => a.vramF32MB - b.vramF32MB)[0].id;
 }
 
+const worstCaseVramMB = (m: EngineModelOption): number => Math.max(m.vramMB, m.vramF32MB);
+
+/**
+ * The largest model still strictly smaller than `id`, excluding anything in `exclude`.
+ * Used to step down when a model the static device-memory heuristic approved still
+ * fails to actually load or run -- the empirical, per-device ground truth that no
+ * static check (device class, declared VRAM figures) can fully replace on the web,
+ * since browsers deliberately don't expose free GPU memory to a page. Returns
+ * undefined once nothing smaller is left to try.
+ */
+export function nextSmaller(id: string, exclude: ReadonlySet<string> = new Set()): EngineModelOption | undefined {
+  const current = AVAILABLE_MODELS.find((m) => m.id === id);
+  if (!current) return undefined;
+  const smaller = AVAILABLE_MODELS.filter(
+    (m) => m.id !== id && !exclude.has(m.id) && worstCaseVramMB(m) < worstCaseVramMB(current)
+  );
+  if (!smaller.length) return undefined;
+  return smaller.reduce((best, m) => (worstCaseVramMB(m) > worstCaseVramMB(best) ? m : best));
+}
+
 export const DEFAULT_MODEL_ID = pickForDevice(
   AVAILABLE_MODELS.find((m) => m.recommended)?.id ?? AVAILABLE_MODELS[0].id
 );

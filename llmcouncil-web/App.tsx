@@ -10,6 +10,7 @@ import { DEFAULT_COUNCIL_SEATS, isWebGPUSupported } from './src/engine/models';
 import { executeWebSearch } from './src/engine/search';
 import { sanitizePII } from './src/engine/sanitize';
 import type { SearchResult } from './src/engine/types';
+import { currentEpoch } from './src/engine/cancellation';
 
 // Lazy-loaded so the @mlc-ai/web-llm engine (and its WASM/model download machinery)
 // is only pulled into the bundle when the user actually switches to Local Assistant mode.
@@ -134,6 +135,10 @@ const App: React.FC = () => {
     setAgentAnalyses(prev => prev.map(a => ({ ...a, status: 'idle', analysis: '', usage: undefined })));
     const runId = ++runIdRef.current;
     const isStale = () => runIdRef.current !== runId;
+    // Captured now, before any await lets an abort click race in, and reused by
+    // every seat: seats run sequentially (see below), so if each one captured this
+    // itself, an abort during an earlier seat would go undetected by a later one.
+    const runEpoch = currentEpoch('council');
 
     try {
       const { text: cleanQuery } = sanitizeText(query);
@@ -163,23 +168,33 @@ const App: React.FC = () => {
       }
       const hooks: LocalRunHooks = {
         sources: grounding,
+        runEpoch,
         onProgress: (text, fraction) => {
           if (!isStale()) setEngineProgress(fraction !== undefined && fraction >= 1 ? null : { text, fraction });
         },
       };
 
-      const promises = COUNCIL_ROLES.map(async (role) => {
+      // One shared engine backs every seat, so they can never truly run at once --
+      // engineManager's queue already serializes them. Awaiting one seat before
+      // starting the next (rather than Promise.all) makes that explicit, and gives
+      // each seat's step-down ladder (if it needs one) the models earlier seats
+      // already resolved to, so it can never converge on one of them.
+      const usedModelIds = new Set<string>();
+      const results: Array<Partial<AgentAnalysis> & { role: AgentRole }> = [];
+      for (const role of COUNCIL_ROLES) {
         const model = modelFor(role)!;
         updateAgent(role, { status: 'thinking', modelName: model.id, providerType: model.providerType });
         try {
-          const { text, usage } = await analyzeWithAgent(role, cleanQuery, model, answerMode, hooks);
-          return { role, analysis: text, usage, status: 'done' as const, modelName: model.id, providerType: model.providerType, prompt: cleanQuery };
+          const { text, usage, resolvedModelId } = await analyzeWithAgent(role, cleanQuery, model, answerMode, hooks, usedModelIds);
+          // The seat may have run on a smaller model than selected, if the chosen
+          // one didn't fit this device (see engineManager's step-down ladder).
+          const finalModelId = resolvedModelId ?? model.id;
+          usedModelIds.add(finalModelId);
+          results.push({ role, analysis: text, usage, status: 'done', modelName: finalModelId, providerType: model.providerType, prompt: cleanQuery });
         } catch (e) {
-          return { role, analysis: (e as Error).message, status: 'error' as const, modelName: model.id, providerType: model.providerType, prompt: cleanQuery };
+          results.push({ role, analysis: (e as Error).message, status: 'error', modelName: model.id, providerType: model.providerType, prompt: cleanQuery });
         }
-      });
-
-      const results = await Promise.all(promises);
+      }
       if (isStale()) return;
       setEngineProgress(null);
 
@@ -187,6 +202,17 @@ const App: React.FC = () => {
         const res = results.find(r => r.role === agent.role);
         return res ? { ...agent, ...res } : agent;
       }));
+      // Selections follow what actually ran, so the pickers stop offering a model
+      // this device can't load, and the next run starts from what already worked
+      // instead of re-discovering it through the same step-downs again.
+      setSelectedModelIds(prev => {
+        const next = { ...prev };
+        let changed = false;
+        for (const r of results) {
+          if (r.modelName && r.modelName !== prev[r.role]) { next[r.role] = r.modelName; changed = true; }
+        }
+        return changed ? next : prev;
+      });
 
       const successfulResults = results.filter(r => r.status === 'done') as unknown as AgentAnalysis[];
       if (successfulResults.length === 0) {
@@ -197,10 +223,13 @@ const App: React.FC = () => {
       const chairModel = modelFor(AgentRole.Chairperson)!;
       updateAgent(AgentRole.Chairperson, { status: 'thinking', modelName: chairModel.id, providerType: chairModel.providerType });
       try {
-        const { report, usage } = await synthesizeConsensus(cleanQuery, successfulResults, answerMode, chairModel, hooks);
+        const { report, usage, resolvedModelId } = await synthesizeConsensus(cleanQuery, successfulResults, answerMode, chairModel, hooks);
         if (isStale()) return;
         setConsensus(report);
-        updateAgent(AgentRole.Chairperson, { status: 'done', usage });
+        updateAgent(AgentRole.Chairperson, { status: 'done', usage, ...(resolvedModelId ? { modelName: resolvedModelId } : {}) });
+        if (resolvedModelId && resolvedModelId !== chairModel.id) {
+          setSelectedModelIds(prev => ({ ...prev, [AgentRole.Chairperson]: resolvedModelId }));
+        }
       } catch (e) {
         if (isStale()) return;
         const message = (e as Error).message;
@@ -315,7 +344,12 @@ const App: React.FC = () => {
                 chairpersonUsage={agentAnalyses.find(a => a.role === AgentRole.Chairperson)?.usage}
                 originalQuery={query}
                 agentAnalyses={agentAnalyses}
-                chairModelLabel={registry.find(m => m.id === selectedModelIds[AgentRole.Chairperson])?.label ?? selectedModelIds[AgentRole.Chairperson]}
+                chairModelLabel={(() => {
+                  // Reflects the model that actually ran once resolved (see the
+                  // step-down ladder), falling back to the selected one beforehand.
+                  const chairId = agentAnalyses.find(a => a.role === AgentRole.Chairperson)?.modelName ?? selectedModelIds[AgentRole.Chairperson];
+                  return registry.find(m => m.id === chairId)?.label ?? chairId;
+                })()}
                 sources={sources}
               />
             </div>

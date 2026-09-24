@@ -13,6 +13,7 @@ const SOURCE_BADGE_COLOR: Record<SearchResult['source'], string> = {
   tavily: 'bg-violet-500/10 text-violet-400 border-violet-500/20',
   brave: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
   wikipedia: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  duckduckgo: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
 };
 
 /**
