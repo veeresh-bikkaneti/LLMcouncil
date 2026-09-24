@@ -14,6 +14,16 @@ export interface LocalRunHooks {
   /** Grounding sources, retrieved once per question and shared by every local seat. */
   sources?: SearchResult[];
   onProgress?: (text: string, fraction?: number) => void;
+  /**
+   * The cancellation epoch captured once when the run started, not per seat. Council
+   * seats now run sequentially (one shared engine can only run one at a time), so if
+   * this were captured fresh inside each seat's own call, an abort during an earlier
+   * seat would go undetected by a later one -- it would capture the already-bumped
+   * epoch as if it were current and run to completion anyway. Falls back to reading
+   * the current epoch live for any caller that doesn't set it (e.g. a single-shot
+   * call outside a multi-seat run, where there's no "earlier seat" to race against).
+   */
+  runEpoch?: number;
 }
 
 interface AgentResult {
@@ -161,9 +171,10 @@ const runLocal = async (
   hooks?: LocalRunHooks,
   excludeModelIds?: ReadonlySet<string>
 ): Promise<{ text: string; resolvedModelId: string }> => {
-  // Captured before the import: on a cold cache the engine chunk can take a while to
-  // arrive, and an abort in the meantime must still cancel this generation.
-  const epoch = currentEpoch('council');
+  // hooks.runEpoch is captured once for the whole run, before any seat starts; see
+  // its doc comment for why that matters for sequential seats. The live fallback
+  // covers a caller with no run-level hooks at all.
+  const epoch = hooks?.runEpoch ?? currentEpoch('council');
   // Dynamic import keeps the ~6MB WebLLM runtime out of the main bundle until an
   // in-browser model is actually used.
   const { generate } = await import('../src/engine/engineManager');

@@ -10,6 +10,7 @@ import { DEFAULT_COUNCIL_SEATS, isWebGPUSupported } from './src/engine/models';
 import { executeWebSearch } from './src/engine/search';
 import { sanitizePII } from './src/engine/sanitize';
 import type { SearchResult } from './src/engine/types';
+import { currentEpoch } from './src/engine/cancellation';
 
 // Lazy-loaded so the @mlc-ai/web-llm engine (and its WASM/model download machinery)
 // is only pulled into the bundle when the user actually switches to Local Assistant mode.
@@ -134,6 +135,10 @@ const App: React.FC = () => {
     setAgentAnalyses(prev => prev.map(a => ({ ...a, status: 'idle', analysis: '', usage: undefined })));
     const runId = ++runIdRef.current;
     const isStale = () => runIdRef.current !== runId;
+    // Captured now, before any await lets an abort click race in, and reused by
+    // every seat: seats run sequentially (see below), so if each one captured this
+    // itself, an abort during an earlier seat would go undetected by a later one.
+    const runEpoch = currentEpoch('council');
 
     try {
       const { text: cleanQuery } = sanitizeText(query);
@@ -163,6 +168,7 @@ const App: React.FC = () => {
       }
       const hooks: LocalRunHooks = {
         sources: grounding,
+        runEpoch,
         onProgress: (text, fraction) => {
           if (!isStale()) setEngineProgress(fraction !== undefined && fraction >= 1 ? null : { text, fraction });
         },
