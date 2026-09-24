@@ -5,6 +5,9 @@ import {
   type MLCEngineInterface,
 } from '@mlc-ai/web-llm';
 import { isWebGPUSupported } from './models';
+import { currentEpoch, GenerationCancelledError, setInterruptHook, type CancelScope } from './cancellation';
+
+export { GenerationCancelledError } from './cancellation';
 
 export type ProgressFn = (text: string, fraction?: number) => void;
 
@@ -17,6 +20,14 @@ let engineModelId: string | null = null;
 // Every load and generation runs through this chain. WebLLM engines don't handle
 // concurrent requests, and a model swap must never happen mid-generation.
 let queue: Promise<unknown> = Promise.resolve();
+
+// Whose generation is streaming right now. interruptGenerate() stops whatever the
+// engine is doing, so a cancel may only use it on its own scope's generation.
+let activeScope: CancelScope | null = null;
+
+setInterruptHook((scope) => {
+  if (activeScope === scope) engine?.interruptGenerate();
+});
 
 function enqueue<T>(task: () => Promise<T>): Promise<T> {
   const run = queue.then(task, task);
@@ -69,6 +80,10 @@ export function loadModel(modelId: string, onProgress?: ProgressFn): Promise<voi
 }
 
 export interface GenerateOptions {
+  /** Which caller this is; cancelScope() on it drops this generation. */
+  scope: CancelScope;
+  /** The scope's epoch when the caller's work began. Defaults to now. */
+  epoch?: number;
   temperature?: number;
   maxTokens?: number;
   onToken?: (delta: string) => void;
@@ -79,25 +94,51 @@ export interface GenerateOptions {
 export function generate(
   modelId: string,
   messages: ChatCompletionMessageParam[],
-  opts: GenerateOptions = {}
+  opts: GenerateOptions
 ): Promise<string> {
+  const { scope } = opts;
+  const epoch = opts.epoch ?? currentEpoch(scope);
+  const cancelled = () => currentEpoch(scope) !== epoch;
   return enqueue(async () => {
+    if (cancelled()) throw new GenerationCancelledError();
     const active = await ensureEngine(modelId, opts.onProgress);
-    const stream = await active.chat.completions.create({
-      messages,
-      temperature: opts.temperature ?? 0,
-      ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
-      stream: true,
-    });
+    // A model download can take minutes; the run may have been aborted meanwhile.
+    if (cancelled()) throw new GenerationCancelledError();
 
-    let text = '';
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta?.content || '';
-      if (delta) {
-        text += delta;
-        opts.onToken?.(delta);
+    activeScope = scope;
+    try {
+      const stream = await active.chat.completions.create({
+        messages,
+        temperature: opts.temperature ?? 0,
+        ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
+        stream: true,
+      });
+
+      let text = '';
+      let interrupted = false;
+      for await (const chunk of stream) {
+        // Checked per chunk as well: an interrupt that lands before the stream's
+        // first step is reset by WebLLM, so it can't be relied on alone. Never break
+        // out of the loop, though: WebLLM releases its engine lock only when the
+        // stream runs to completion, so abandoning it would deadlock the engine.
+        if (cancelled()) {
+          if (!interrupted) {
+            interrupted = true;
+            active.interruptGenerate();
+          }
+          continue;
+        }
+        const delta = chunk.choices[0]?.delta?.content || '';
+        if (delta) {
+          text += delta;
+          opts.onToken?.(delta);
+        }
       }
+      // An interrupted stream ends early but normally; its partial text is not an answer.
+      if (cancelled()) throw new GenerationCancelledError();
+      return text;
+    } finally {
+      activeScope = null;
     }
-    return text;
   });
 }

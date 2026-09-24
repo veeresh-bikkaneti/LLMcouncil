@@ -440,6 +440,11 @@ const InputPanel: React.FC<InputPanelProps> = ({
             <button onClick={handleSubmit} disabled={isLoading || !query.trim()} className="w-full py-4.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-black rounded-[1.5rem] transition-all uppercase tracking-[0.2em] text-[11px] shadow-xl active:scale-95">
               {isLoading ? 'Signal Processing...' : 'Invoke Universal Council'}
             </button>
+            {isLoading && (
+              <button onClick={onShowCancel} className="w-full py-3 bg-transparent border border-rose-500/30 hover:bg-rose-500/10 text-rose-400 font-black rounded-[1.5rem] transition-all uppercase tracking-[0.2em] text-[10px]">
+                Stop Council
+              </button>
+            )}
           </div>
         </div>
       ) : (

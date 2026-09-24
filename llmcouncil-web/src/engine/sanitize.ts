@@ -8,7 +8,7 @@ const SSN_RE = /\b\d{3}-\d{2}-\d{4}\b/g;
 // false-positive risk on other 9-digit numbers -- SSN is the one PII type called out
 // explicitly and unconditionally, so we err on the side of over-redacting here.
 const SSN_PLAIN_RE = /\b\d{9}\b/g;
-const EMAIL_RE = /\b[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}\b/g;
+const EMAIL_RE = /\b[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-zA-Z]{2,}\b/g;
 const PHONE_RE = /\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g;
 const DOB_RE = /\b(0?[1-9]|1[0-2])[/-](0?[1-9]|[12]\d|3[01])[/-](\d{4}|\d{2})\b/g;
 // Deliberately NOT matching textual dates ("January 5, 1990") or general international
