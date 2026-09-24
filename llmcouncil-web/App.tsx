@@ -17,19 +17,20 @@ const GroundedAssistant = lazy(() => import('./components/GroundedAssistant'));
 
 // v4: earlier builds saved Gemini defaults here, which a keyless deployment can't run.
 // v5: earlier builds put one model in every seat; the defaults now mix three families.
-const STORAGE_KEY = 'llm_council_selections_v5';
+// v6: the Council dropped from 4 models (3 members + a chair reusing one of them) to
+// 3: two members deliberate, a third, dedicated model gives the Final Arbitration.
+const STORAGE_KEY = 'llm_council_selections_v6';
 const MODE_STORAGE_KEY = 'llm_council_mode_v1';
 // Shared with the Local Assistant, so one optional Tavily/Brave key serves both modes.
 const SEARCH_KEY_STORAGE = 'llm_council_local_search_key_v1';
 const PRIVACY_FILTER_ID = 'on-device-pii-filter';
 
-const COUNCIL_ROLES = [AgentRole.Model1, AgentRole.Model2, AgentRole.Model3];
+const COUNCIL_ROLES = [AgentRole.Model1, AgentRole.Model2];
 
 const defaultSelections = (): Record<AgentRole, string> => ({
   [AgentRole.Privacy]: PRIVACY_FILTER_ID,
   [AgentRole.Model1]: DEFAULT_COUNCIL_SEATS.members[0],
   [AgentRole.Model2]: DEFAULT_COUNCIL_SEATS.members[1],
-  [AgentRole.Model3]: DEFAULT_COUNCIL_SEATS.members[2],
   [AgentRole.Chairperson]: DEFAULT_COUNCIL_SEATS.chair,
 });
 

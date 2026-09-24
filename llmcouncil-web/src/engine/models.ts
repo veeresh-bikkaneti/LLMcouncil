@@ -208,21 +208,23 @@ export const DEFAULT_MODEL_ID = pickForDevice(
 );
 
 export interface CouncilSeatDefaults {
-  /** Model 1, Model 2, Model 3: three different model families, so the members
-   *  actually disagree instead of one model agreeing with itself. */
-  members: [string, string, string];
+  /** Model 1, Model 2: two different model families, so they actually disagree
+   *  instead of one model agreeing with itself. */
+  members: [string, string];
+  /** A third, distinct model that only arbitrates -- never one of the members'
+   *  models, so the two deliberating seats and the arbitrator are 3 models total. */
   chair: string;
 }
 
 // Seats run one after another on the shared engine, so each different model is a
-// swap (from the browser cache after the first run). The Chairperson uses Model 3's
-// model so the final step needs no extra swap.
+// swap (from the browser cache after the first run). Three seats total: two
+// deliberate, then a third, dedicated model gives the Final Arbitration.
 const COUNCIL_DESKTOP: CouncilSeatDefaults = {
-  members: ['Qwen2.5-1.5B-Instruct-q4f16_1-MLC', 'SmolLM2-1.7B-Instruct-q4f16_1-MLC', 'Llama-3.2-3B-Instruct-q4f16_1-MLC'],
+  members: ['Qwen2.5-1.5B-Instruct-q4f16_1-MLC', 'SmolLM2-1.7B-Instruct-q4f16_1-MLC'],
   chair: 'Llama-3.2-3B-Instruct-q4f16_1-MLC',
 };
 const COUNCIL_PHONE: CouncilSeatDefaults = {
-  members: ['Qwen2.5-0.5B-Instruct-q4f16_1-MLC', 'SmolLM2-360M-Instruct-q4f16_1-MLC', 'Llama-3.2-1B-Instruct-q4f16_1-MLC'],
+  members: ['Qwen2.5-0.5B-Instruct-q4f16_1-MLC', 'SmolLM2-360M-Instruct-q4f16_1-MLC'],
   chair: 'Llama-3.2-1B-Instruct-q4f16_1-MLC',
 };
 
@@ -233,10 +235,10 @@ function seatsFit(seats: CouncilSeatDefaults): boolean {
   });
 }
 
-/** Default Council line-up for this device: Alibaba, Hugging Face and Meta models. */
+/** Default Council line-up for this device: 3 models total (Alibaba, Hugging Face, Meta). */
 export const DEFAULT_COUNCIL_SEATS: CouncilSeatDefaults = seatsFit(COUNCIL_DESKTOP)
   ? COUNCIL_DESKTOP
   : {
-      members: COUNCIL_PHONE.members.map(pickForDevice) as [string, string, string],
+      members: COUNCIL_PHONE.members.map(pickForDevice) as [string, string],
       chair: pickForDevice(COUNCIL_PHONE.chair),
     };

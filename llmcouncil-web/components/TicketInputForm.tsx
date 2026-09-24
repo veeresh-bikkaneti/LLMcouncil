@@ -217,7 +217,7 @@ interface InputPanelProps {
 
 export const isSelectableModel = (m: ModelQuota): boolean => m.connectionStatus === 'connected' || !!m.isSystemModel;
 
-const COUNCIL_SEATS = [AgentRole.Model1, AgentRole.Model2, AgentRole.Model3, AgentRole.Chairperson];
+const COUNCIL_SEATS = [AgentRole.Model1, AgentRole.Model2, AgentRole.Chairperson];
 
 const InputPanel: React.FC<InputPanelProps> = ({
   query, setQuery, handleSubmit, handleCancel, isLoading, useAutomation, setUseAutomation, selectedModels, onModelChange, requestCounts, onShowCancel, answerMode, setAnswerMode, registry, setRegistry
@@ -434,9 +434,10 @@ const InputPanel: React.FC<InputPanelProps> = ({
                    </select>
                 </div>
               ))}
-              {new Set([AgentRole.Model1, AgentRole.Model2, AgentRole.Model3].map(r => selectedModels[r])).size < 3 && (
+              {new Set(COUNCIL_SEATS.map(r => selectedModels[r])).size < COUNCIL_SEATS.length && (
                 <p className="text-[10px] text-amber-300/90 leading-relaxed ml-1">
-                  Pick three different models for the specialist seats. A model debating itself mostly agrees with itself.
+                  Pick three different models: two to deliberate and a third, distinct one for Final Arbitration.
+                  A model debating itself, or arbitrating its own answer, mostly agrees with itself.
                 </p>
               )}
               <p className="text-[9px] text-slate-600 leading-relaxed ml-1">
