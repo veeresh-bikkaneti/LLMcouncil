@@ -120,7 +120,7 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, onAnalysisChange, useAutom
           <div className="bg-amber-500/[0.04] p-10 rounded-[2rem] border border-amber-500/20 shadow-inner">
             <div className="flex items-center gap-3 mb-6">
               <div className="p-2.5 bg-amber-500/10 rounded-xl"><InfoIcon className="w-5 h-5 text-amber-500" /></div>
-              <span className="font-black uppercase text-[11px] tracking-[0.2em] text-amber-500">Authentication Protocol Interrupted</span>
+              <span className="font-black uppercase text-[11px] tracking-[0.2em] text-amber-500">{agent.providerType === 'webllm' ? 'In-browser model error' : 'Model request failed'}</span>
             </div>
             <p className="text-amber-200/60 text-sm font-medium leading-relaxed italic pr-4">{agent.analysis || "Authorization required. Establish a link via the Model Hub or import a secure vault."}</p>
           </div>

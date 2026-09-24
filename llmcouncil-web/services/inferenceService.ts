@@ -4,6 +4,7 @@ import { sanitizePII } from '../src/engine/sanitize';
 import { CONFIDENCE_RULE, formatSources, GROUNDING_RULES, localInputBudgetChars, parseGroundedOutput, promptCost, truncate } from '../src/engine/grounding';
 import type { SearchResult } from '../src/engine/types';
 import { cancelScope, currentEpoch } from '../src/engine/cancellation';
+import { getDeviceProfile } from '../src/engine/models';
 
 // Only non-empty when the deployment was built with GEMINI_API_KEY set; Vite compiles
 // this to a literal `undefined` otherwise.
@@ -135,7 +136,10 @@ const LOCAL_PERSONA: Partial<Record<AgentRole, string>> = {
 
 // Small in-browser models ramble without a cap, and the Council runs four of these
 // generations back to back on one engine.
-const LOCAL_MAX_TOKENS: Record<AnswerMode, number> = { simple: 320, complex: 900 };
+// Phones run a 2048-token window, so replies are capped lower there.
+const LOCAL_MAX_TOKENS: Record<AnswerMode, number> = getDeviceProfile().constrained
+  ? { simple: 256, complex: 400 }
+  : { simple: 320, complex: 900 };
 
 /** Stops the Council's in-browser generations, including any not yet started. */
 export const cancelLocalGenerations = (): void => cancelScope('council');

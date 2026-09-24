@@ -2,12 +2,13 @@ import { executeWebSearch } from './search';
 import { sanitizePII } from './sanitize';
 import { generate, loadModel, type ProgressFn } from './engineManager';
 import { CONFIDENCE_RULE, formatSources, GROUNDING_RULES, localInputBudgetChars, parseGroundedOutput, promptCost, truncate } from './grounding';
-import { DEFAULT_MODEL_ID } from './models';
+import { DEFAULT_MODEL_ID, getDeviceProfile } from './models';
 import type { SearchResult, SendMessageResult, WebLLMChatbotOptions } from './types';
 
 export { AVAILABLE_MODELS, DEFAULT_MODEL_ID, isWebGPUSupported } from './models';
 
-const MAX_REPLY_TOKENS = 900;
+// Shorter on phones, where the whole context window is 2048 tokens.
+const MAX_REPLY_TOKENS = getDeviceProfile().constrained ? 400 : 900;
 
 /**
  * Generic JavaScript orchestrator around in-browser models. The model is never given
@@ -58,7 +59,7 @@ export class WebLLMChatbot {
 
     const safeQuery = sanitizePII(userQuery.trim());
     const sources = await this.executeWebSearch(safeQuery);
-    // Prompt plus reply must fit the model's 4096-token context window.
+    // Prompt plus reply must fit the loaded context window (4096 tokens, 2048 on phones).
     const budget = localInputBudgetChars(MAX_REPLY_TOKENS);
     const promptQuery = truncate(safeQuery, Math.floor(budget * 0.25));
     const systemPrompt = [

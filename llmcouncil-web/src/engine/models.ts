@@ -171,6 +171,18 @@ export function getDeviceProfile(): DeviceProfile {
   return deviceProfile;
 }
 
+// Phones get half the context window: a smaller KV cache and shorter prompts mean
+// less GPU memory and less prefill work per answer, both of which can get a phone's
+// GPU reset mid-answer ("Buffer was unmapped..."). The largest single GPU pass is
+// set by the model's compiled prefill chunk size and doesn't change.
+const PHONE_CONTEXT_TOKENS = 2048;
+const DEFAULT_CONTEXT_TOKENS = 4096; // every shipped model's compiled window
+
+/** Context window (prompt plus reply) the engine is loaded with on this device. */
+export function localContextTokens(): number {
+  return getDeviceProfile().constrained ? PHONE_CONTEXT_TOKENS : DEFAULT_CONTEXT_TOKENS;
+}
+
 /**
  * Whether this device can load `model` without risking the tab being killed. Judged
  * on the larger q4f32 build: whether the GPU has shader-f16 (and so gets the smaller
