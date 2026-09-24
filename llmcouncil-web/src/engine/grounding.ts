@@ -21,13 +21,42 @@ const CHARS_PER_TOKEN = 3.5;
 // chat template), with headroom for text that tokenizes worse than English.
 const PROMPT_OVERHEAD_TOKENS = 700;
 
-/** Characters of variable prompt content that fit alongside a reply of `maxTokens`. */
+// 3.5 chars/token only holds for ASCII text. CJK and other non-Latin scripts run
+// closer to one token per character (or worse), so each non-ASCII character is
+// charged as a whole token's worth of budget.
+const NON_ASCII_COST = CHARS_PER_TOKEN;
+
+function charCost(code: number): number {
+  return code < 128 ? 1 : NON_ASCII_COST;
+}
+
+/** A text's size in budget units: ASCII chars count 1, non-ASCII chars a full token. */
+export function promptCost(text: string): number {
+  let cost = 0;
+  for (let i = 0; i < text.length; i++) cost += charCost(text.charCodeAt(i));
+  return cost;
+}
+
+/** Budget units (see promptCost) of variable prompt content that fit alongside a reply of `maxTokens`. */
 export function localInputBudgetChars(maxTokens: number): number {
   return Math.floor((LOCAL_CONTEXT_TOKENS - maxTokens - PROMPT_OVERHEAD_TOKENS) * CHARS_PER_TOKEN);
 }
 
-export function truncate(text: string, maxChars: number): string {
-  return text.length <= maxChars ? text : `${text.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+/** Cuts `text` so its promptCost fits `maxCost`, marking the cut with an ellipsis. */
+export function truncate(text: string, maxCost: number): string {
+  if (promptCost(text) <= maxCost) return text;
+  const limit = maxCost - NON_ASCII_COST; // room for the ellipsis
+  let cost = 0;
+  let end = 0;
+  while (end < text.length) {
+    const next = cost + charCost(text.charCodeAt(end));
+    if (next > limit) break;
+    cost = next;
+    end++;
+  }
+  // Don't split a surrogate pair.
+  if (end > 0 && /[\uD800-\uDBFF]/.test(text[end - 1])) end--;
+  return `${text.slice(0, end).trimEnd()}…`;
 }
 
 /** Formats sources for a prompt, splitting `maxTotalChars` evenly across them. */
@@ -37,7 +66,7 @@ export function formatSources(sources: SearchResult[], maxTotalChars = Infinity)
   return sources
     .map((s) => {
       const header = `[${s.id}] ${s.title}\nURL: ${s.url}\nEXCERPT: `;
-      return header + truncate(s.content, Math.max(80, Math.floor(perSource - header.length)));
+      return header + truncate(s.content, Math.max(80, Math.floor(perSource - promptCost(header))));
     })
     .join('\n\n');
 }

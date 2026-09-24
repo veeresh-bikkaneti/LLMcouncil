@@ -1,8 +1,9 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AgentRole, type AgentAnalysis, type TokenUsage, type ModelQuota, type AnswerMode, type ConsensusReport } from '../types';
 import { sanitizePII } from '../src/engine/sanitize';
-import { CONFIDENCE_RULE, formatSources, GROUNDING_RULES, localInputBudgetChars, parseGroundedOutput, truncate } from '../src/engine/grounding';
+import { CONFIDENCE_RULE, formatSources, GROUNDING_RULES, localInputBudgetChars, parseGroundedOutput, promptCost, truncate } from '../src/engine/grounding';
 import type { SearchResult } from '../src/engine/types';
+import { cancelScope, currentEpoch } from '../src/engine/cancellation';
 
 // Only non-empty when the deployment was built with GEMINI_API_KEY set; Vite compiles
 // this to a literal `undefined` otherwise.
@@ -136,20 +137,15 @@ const LOCAL_PERSONA: Partial<Record<AgentRole, string>> = {
 // generations back to back on one engine.
 const LOCAL_MAX_TOKENS: Record<AnswerMode, number> = { simple: 320, complex: 900 };
 
-type EngineModule = typeof import('../src/engine/engineManager');
-let engineModule: EngineModule | null = null;
-
-/** Stops in-browser generations for an aborted run. A no-op until the engine is loaded. */
-export const cancelLocalGenerations = (): void => {
-  engineModule?.cancelPending();
-};
+/** Stops the Council's in-browser generations, including any not yet started. */
+export const cancelLocalGenerations = (): void => cancelScope('council');
 
 /** Budgets for variable prompt content so a local prompt plus reply fits the model's context. */
 const localBudget = (query: string, mode: AnswerMode) => {
   const total = localInputBudgetChars(LOCAL_MAX_TOKENS[mode]);
   // A huge pasted query must not crowd out everything else.
   const trimmedQuery = truncate(query, Math.floor(total * 0.25));
-  return { query: trimmedQuery, remaining: total - trimmedQuery.length };
+  return { query: trimmedQuery, remaining: total - promptCost(trimmedQuery) };
 };
 
 const runLocal = async (
@@ -159,17 +155,19 @@ const runLocal = async (
   mode: AnswerMode,
   hooks?: LocalRunHooks
 ): Promise<string> => {
+  // Captured before the import: on a cold cache the engine chunk can take a while to
+  // arrive, and an abort in the meantime must still cancel this generation.
+  const epoch = currentEpoch('council');
   // Dynamic import keeps the ~6MB WebLLM runtime out of the main bundle until an
   // in-browser model is actually used.
-  engineModule ??= await import('../src/engine/engineManager');
-  const { generate } = engineModule;
+  const { generate } = await import('../src/engine/engineManager');
   return generate(
     model.id,
     [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
-    { temperature: 0, maxTokens: LOCAL_MAX_TOKENS[mode], onProgress: hooks?.onProgress }
+    { scope: 'council', epoch, temperature: 0, maxTokens: LOCAL_MAX_TOKENS[mode], onProgress: hooks?.onProgress }
   );
 };
 

@@ -1,7 +1,7 @@
 import { executeWebSearch } from './search';
 import { sanitizePII } from './sanitize';
 import { generate, loadModel, type ProgressFn } from './engineManager';
-import { CONFIDENCE_RULE, formatSources, GROUNDING_RULES, localInputBudgetChars, parseGroundedOutput, truncate } from './grounding';
+import { CONFIDENCE_RULE, formatSources, GROUNDING_RULES, localInputBudgetChars, parseGroundedOutput, promptCost, truncate } from './grounding';
 import { DEFAULT_MODEL_ID } from './models';
 import type { SearchResult, SendMessageResult, WebLLMChatbotOptions } from './types';
 
@@ -65,7 +65,7 @@ export class WebLLMChatbot {
       'You are a strict fact-grounding rewriter.',
       GROUNDING_RULES,
       CONFIDENCE_RULE,
-      `SOURCES:\n${formatSources(sources, budget - promptQuery.length)}`,
+      `SOURCES:\n${formatSources(sources, budget - promptCost(promptQuery))}`,
     ].join('\n\n');
 
     const fullText = await generate(
@@ -74,7 +74,7 @@ export class WebLLMChatbot {
         { role: 'system', content: systemPrompt },
         { role: 'user', content: promptQuery },
       ],
-      { temperature: 0, maxTokens: MAX_REPLY_TOKENS, onToken }
+      { scope: 'assistant', temperature: 0, maxTokens: MAX_REPLY_TOKENS, onToken }
     );
 
     const { answer, confidence } = parseGroundedOutput(fullText);
