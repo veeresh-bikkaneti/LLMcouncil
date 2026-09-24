@@ -123,7 +123,6 @@ const getAgentPrompt = (role: AgentRole, query: string): string => {
   switch (role) {
     case AgentRole.Model1: return `Direct, data-driven precision analysis for: "${query}"`;
     case AgentRole.Model2: return `Deep step-by-step reasoning and implications for: "${query}"`;
-    case AgentRole.Model3: return `Creative multi-perspective strategic view on: "${query}"`;
     default: return query;
   }
 };
@@ -131,10 +130,9 @@ const getAgentPrompt = (role: AgentRole, query: string): string => {
 const LOCAL_PERSONA: Partial<Record<AgentRole, string>> = {
   [AgentRole.Model1]: 'You are Model 1 on an LLM council, the Factualist: give a direct, precise, data-driven answer.',
   [AgentRole.Model2]: 'You are Model 2 on an LLM council, the Analyst: reason step by step through the question and its implications.',
-  [AgentRole.Model3]: 'You are Model 3 on an LLM council, the Strategist: offer an alternative, multi-perspective framing of the question.',
 };
 
-// Small in-browser models ramble without a cap, and the Council runs four of these
+// Small in-browser models ramble without a cap, and the Council runs three of these
 // generations back to back on one engine.
 // Phones run a 2048-token window, so replies are capped lower there.
 const LOCAL_MAX_TOKENS: Record<AnswerMode, number> = getDeviceProfile().constrained

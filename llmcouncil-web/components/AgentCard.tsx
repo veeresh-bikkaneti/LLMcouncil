@@ -1,6 +1,6 @@
 import React from 'react';
 import { AgentRole, type AgentAnalysis, type ModelQuota } from '../types';
-import { Model1Icon, Model2Icon, Model3Icon, ShieldIcon, InfoIcon } from './icons';
+import { Model1Icon, Model2Icon, ShieldIcon, InfoIcon } from './icons';
 import { INITIAL_MODELS as AVAILABLE_MODELS } from './TicketInputForm';
 import { Markdown } from './Markdown';
 
@@ -32,7 +32,6 @@ const getAgentIcon = (role: AgentRole) => {
     case AgentRole.Privacy: return <ShieldIcon className={`${cls} text-emerald-400`} />;
     case AgentRole.Model1: return <Model1Icon className={`${cls} text-cyan-400`} />;
     case AgentRole.Model2: return <Model2Icon className={`${cls} text-amber-400`} />;
-    case AgentRole.Model3: return <Model3Icon className={`${cls} text-rose-400`} />;
     default: return null;
   }
 };

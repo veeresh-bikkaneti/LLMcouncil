@@ -2,7 +2,6 @@ export enum AgentRole {
   Privacy = 'Privacy Shield',
   Model1 = 'Model 1',
   Model2 = 'Model 2',
-  Model3 = 'Model 3',
   Chairperson = 'Chairperson'
 }
 
