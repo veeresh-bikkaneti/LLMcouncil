@@ -471,8 +471,8 @@ const InputPanel: React.FC<InputPanelProps> = ({
               { title: 'On this device', note: 'Free, private, no key. These run the Council by default.', models: filteredModels.filter(m => m.providerType === 'webllm') },
               { title: 'Cloud and self-hosted (optional)', note: 'Only used if you add your own API key or run a local server. Nothing is sent to them otherwise.', models: filteredModels.filter(m => m.providerType !== 'webllm') },
             ].filter(section => section.models.length > 0).map(section => (
-              <div key={section.title} className="flex flex-col gap-3">
-                <div className="mt-2 first:mt-0 px-1">
+              <div key={section.title} className="flex flex-col gap-3 mt-2 first:mt-0">
+                <div className="px-1">
                   <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">{section.title}</h3>
                   <p className="text-[10px] text-slate-600 leading-relaxed mt-1">{section.note}</p>
                 </div>
@@ -482,10 +482,12 @@ const InputPanel: React.FC<InputPanelProps> = ({
                   const status = m.providerType === 'webllm'
                     ? { text: 'No key needed · runs in your browser', color: 'emerald' }
                     : ready
-                      ? { text: 'Key added', color: 'emerald' }
-                      : provider?.isLocal
-                        ? { text: m.connectionStatus === 'error' ? 'Server not running' : 'Not set up', color: 'slate' }
-                        : { text: 'Needs your API key', color: 'slate' };
+                      ? { text: provider?.isLocal ? 'Server connected' : 'Key added', color: 'emerald' }
+                      : m.connectionStatus === 'connecting'
+                        ? { text: 'Connecting…', color: 'slate' }
+                        : provider?.isLocal
+                          ? { text: m.connectionStatus === 'error' ? 'Server not running' : 'Not set up', color: 'slate' }
+                          : { text: 'Needs your API key', color: 'slate' };
                   return (
                     <div key={m.id} className={`p-4 rounded-2xl border transition-all relative group flex flex-col gap-3 ${ready ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-slate-950/60 border-slate-800 hover:border-violet-500/30'}`}>
                       <div className="flex justify-between items-start gap-3">
