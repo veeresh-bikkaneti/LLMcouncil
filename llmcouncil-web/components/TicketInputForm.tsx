@@ -171,7 +171,7 @@ export const INITIAL_MODELS: ModelQuota[] = [
 const CATEGORIES: ModelCategory[] = ['All', 'Pro', 'Reasoning', 'Coding', 'Writing', 'Speed', 'Local'];
 
 const ModelInfoTooltip: React.FC<{ model: ModelQuota; provider?: ProviderMetadata }> = ({ model, provider }) => (
-  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 w-72 p-5 bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl z-[200] opacity-0 group-hover/info:opacity-100 pointer-events-none transition-all duration-300 transform translate-y-2 group-hover/info:translate-y-0 backdrop-blur-2xl ring-1 ring-white/10">
+  <div className="absolute bottom-full right-0 mb-4 w-72 max-w-[calc(100vw-3rem)] p-5 bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl z-[200] opacity-0 group-hover/info:opacity-100 pointer-events-none transition-all duration-300 transform translate-y-2 group-hover/info:translate-y-0 backdrop-blur-2xl ring-1 ring-white/10">
     <div className="flex justify-between items-center mb-3">
       <div className="flex items-center gap-2">
         <div className="w-6 h-6 rounded bg-slate-800 flex items-center justify-center text-[10px] font-black text-violet-400">
@@ -192,7 +192,7 @@ const ModelInfoTooltip: React.FC<{ model: ModelQuota; provider?: ProviderMetadat
       </div>
     )}
     <a href={model.pricingUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-violet-400 hover:text-violet-300 font-black uppercase tracking-widest pointer-events-auto block border-t border-slate-800 pt-3 transition-colors">
-      View Integration Docs &rarr;
+      {model.providerType === 'webllm' ? 'About WebLLM' : 'Provider docs'} &rarr;
     </a>
   </div>
 );
@@ -434,8 +434,13 @@ const InputPanel: React.FC<InputPanelProps> = ({
                    </select>
                 </div>
               ))}
+              {new Set([AgentRole.Model1, AgentRole.Model2, AgentRole.Model3].map(r => selectedModels[r])).size < 3 && (
+                <p className="text-[10px] text-amber-300/90 leading-relaxed ml-1">
+                  Pick three different models for the specialist seats. A model debating itself mostly agrees with itself.
+                </p>
+              )}
               <p className="text-[9px] text-slate-600 leading-relaxed ml-1">
-                In-browser seats run on your GPU with no API key and share one model download. Cloud models appear here once you connect a key in the Model Hub.
+                In-browser seats run on your GPU with no API key. Each different model is downloaded once, then loaded from the browser cache; they take turns, so a run swaps between them. Cloud models appear here once you add a key in the Model Hub.
               </p>
             </div>
             <button onClick={handleSubmit} disabled={isLoading || !query.trim()} className="w-full py-4.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-black rounded-[1.5rem] transition-all uppercase tracking-[0.2em] text-[11px] shadow-xl active:scale-95">
@@ -462,41 +467,56 @@ const InputPanel: React.FC<InputPanelProps> = ({
             </div>
           </div>
           <div className="flex flex-col gap-3 overflow-y-auto pr-1 custom-scrollbar flex-grow">
-            {filteredModels.map(m => {
-              const provider = PROVIDERS.find(p => p.id === m.providerId);
-              const statusColor = m.connectionStatus === 'connected' ? 'emerald' : m.connectionStatus === 'error' ? 'rose' : 'slate';
-              return (
-                <div key={m.id} className={`p-4 rounded-2xl border transition-all relative group flex flex-col gap-3 ${m.connectionStatus === 'connected' ? 'bg-emerald-500/5 border-emerald-500/20 shadow-[inset_0_0_20px_rgba(16,185,129,0.02)]' : 'bg-slate-950/60 border-slate-800 hover:border-violet-500/30'}`}>
-                  <div className="flex justify-between items-start gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center text-xs font-black text-violet-400 border border-slate-800 flex-shrink-0 group-hover:border-violet-500/40 transition-colors">{provider?.logo || 'M'}</div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[12px] font-black text-slate-100 uppercase tracking-tight truncate">{m.label}</span>
-                          {m.isNew && <span className="text-[7px] bg-violet-600 text-white px-1.5 py-0.5 rounded-full font-black uppercase">New</span>}
+            {[
+              { title: 'On this device', note: 'Free, private, no key. These run the Council by default.', models: filteredModels.filter(m => m.providerType === 'webllm') },
+              { title: 'Cloud and self-hosted (optional)', note: 'Only used if you add your own API key or run a local server. Nothing is sent to them otherwise.', models: filteredModels.filter(m => m.providerType !== 'webllm') },
+            ].filter(section => section.models.length > 0).map(section => (
+              <div key={section.title} className="flex flex-col gap-3 mt-2 first:mt-0">
+                <div className="px-1">
+                  <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400">{section.title}</h3>
+                  <p className="text-[10px] text-slate-600 leading-relaxed mt-1">{section.note}</p>
+                </div>
+                {section.models.map(m => {
+                  const provider = PROVIDERS.find(p => p.id === m.providerId);
+                  const ready = m.connectionStatus === 'connected';
+                  const status = m.providerType === 'webllm'
+                    ? { text: 'No key needed · runs in your browser', color: 'emerald' }
+                    : ready
+                      ? { text: provider?.isLocal ? 'Server connected' : 'Key added', color: 'emerald' }
+                      : m.connectionStatus === 'connecting'
+                        ? { text: 'Connecting…', color: 'slate' }
+                        : provider?.isLocal
+                          ? { text: m.connectionStatus === 'error' ? 'Server not running' : 'Not set up', color: 'slate' }
+                          : { text: 'Needs your API key', color: 'slate' };
+                  return (
+                    <div key={m.id} className={`p-4 rounded-2xl border transition-all relative group flex flex-col gap-3 ${ready ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-slate-950/60 border-slate-800 hover:border-violet-500/30'}`}>
+                      <div className="flex justify-between items-start gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center text-xs font-black text-violet-400 border border-slate-800 flex-shrink-0">{provider?.logo || 'M'}</div>
+                          <div className="min-w-0 flex-1">
+                            <span className="text-[12px] font-black text-slate-100 uppercase tracking-tight truncate block">{m.label.replace(' (in-browser)', '')}</span>
+                            <span className="text-[9px] text-slate-600 font-mono tracking-widest block uppercase truncate">{provider?.name || m.providerId}</span>
+                          </div>
                         </div>
-                        <span className="text-[9px] text-slate-600 font-mono tracking-widest block uppercase truncate">{m.providerId}</span>
+                        <div className="relative group/info flex-shrink-0">
+                          <div className="p-1.5 hover:bg-slate-800 rounded-lg transition-colors cursor-help"><InfoIcon className="w-4 h-4 text-slate-600 group-hover/info:text-violet-400" /></div>
+                          <ModelInfoTooltip model={m} provider={provider} />
+                        </div>
+                      </div>
+                      <div className="flex justify-between items-center gap-3 pt-2 border-t border-slate-800/40">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${status.color === 'emerald' ? 'bg-emerald-500' : 'bg-slate-600'}`} />
+                          <span className={`text-[9px] font-black uppercase tracking-widest truncate ${status.color === 'emerald' ? 'text-emerald-500' : 'text-slate-500'}`}>{status.text}</span>
+                        </div>
+                        {!ready && m.providerType !== 'webllm' && (
+                          <button onClick={(e) => { e.stopPropagation(); handleConnect(m); }} className="flex-shrink-0 text-[9px] font-black uppercase text-violet-400 hover:text-white transition-all px-3 py-1 bg-violet-600/10 rounded-lg border border-violet-500/20 active:scale-95">{provider?.isLocal ? 'Set up' : 'Add key'}</button>
+                        )}
                       </div>
                     </div>
-                    <div className="relative group/info flex-shrink-0">
-                      <div className="p-1.5 hover:bg-slate-800 rounded-lg transition-colors cursor-help"><InfoIcon className="w-4 h-4 text-slate-600 group-hover/info:text-violet-400" /></div>
-                      <ModelInfoTooltip model={m} provider={provider} />
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center pt-2 border-t border-slate-800/40">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-1.5 h-1.5 rounded-full bg-${statusColor}-500 shadow-[0_0_8px_rgba(var(--tw-${statusColor}-500-rgb),0.5)]`} />
-                      <span className={`text-[9px] font-black uppercase text-${statusColor}-500 tracking-widest`}>{m.connectionStatus || 'disconnected'}</span>
-                      <span className="text-slate-800/30">|</span>
-                      <div className="text-[9px] font-bold text-slate-600 flex items-center gap-1.5"><svg className="w-2.5 h-2.5 text-amber-500" viewBox="0 0 24 24" fill="currentColor"><path d="M13 10V3L4 14H11V21L20 10H13Z"/></svg>{m.tokenMetric || 1}</div>
-                    </div>
-                    {m.connectionStatus !== 'connected' && (
-                      <button onClick={(e) => { e.stopPropagation(); handleConnect(m); }} className="text-[9px] font-black uppercase text-violet-400 hover:text-white transition-all px-3 py-1 bg-violet-600/10 rounded-lg border border-violet-500/20 active:scale-95">Establish Link</button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            ))}
           </div>
         </div>
       )}

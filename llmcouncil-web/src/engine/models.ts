@@ -34,6 +34,28 @@ export const AVAILABLE_MODELS: EngineModelOption[] = [
     description: 'The lightest option, for older phones. Good for short factual lookups only.',
   },
   {
+    id: 'SmolLM2-360M-Instruct-q4f16_1-MLC',
+    label: 'SmolLM2 360M',
+    tier: 'fast',
+    capabilities: ['fast'],
+    sizeLabel: 'under 0.5 GB',
+    vramLabel: '~0.6 GB VRAM',
+    vramMB: 376,
+    vramF32MB: 580,
+    description: "Hugging Face's tiny model. A third voice on the phone Council; too small to lean on alone.",
+  },
+  {
+    id: 'SmolLM2-1.7B-Instruct-q4f16_1-MLC',
+    label: 'SmolLM2 1.7B',
+    tier: 'fast',
+    capabilities: ['fast', 'summarizing'],
+    sizeLabel: '~1.8 GB',
+    vramLabel: '~2 GB VRAM',
+    vramMB: 1774,
+    vramF32MB: 2692,
+    description: "Hugging Face's compact model, trained on different data from Llama and Qwen: a distinct Council voice.",
+  },
+  {
     id: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC',
     label: 'Qwen2.5 1.5B',
     tier: 'fast',
@@ -173,7 +195,36 @@ export const DEFAULT_MODEL_ID = pickForDevice(
   AVAILABLE_MODELS.find((m) => m.recommended)?.id ?? AVAILABLE_MODELS[0].id
 );
 
-// The Council makes four sequential generations per question (three members plus
-// the Chairperson) on one shared in-browser engine, so it defaults to a faster model
-// than the single-pass Local Assistant does. All seats share it: one download.
-export const DEFAULT_COUNCIL_MODEL_ID = pickForDevice('Llama-3.2-3B-Instruct-q4f16_1-MLC');
+export interface CouncilSeatDefaults {
+  /** Model 1, Model 2, Model 3: three different model families, so the members
+   *  actually disagree instead of one model agreeing with itself. */
+  members: [string, string, string];
+  chair: string;
+}
+
+// Seats run one after another on the shared engine, so each different model is a
+// swap (from the browser cache after the first run). The Chairperson uses Model 3's
+// model so the final step needs no extra swap.
+const COUNCIL_DESKTOP: CouncilSeatDefaults = {
+  members: ['Qwen2.5-1.5B-Instruct-q4f16_1-MLC', 'SmolLM2-1.7B-Instruct-q4f16_1-MLC', 'Llama-3.2-3B-Instruct-q4f16_1-MLC'],
+  chair: 'Llama-3.2-3B-Instruct-q4f16_1-MLC',
+};
+const COUNCIL_PHONE: CouncilSeatDefaults = {
+  members: ['Qwen2.5-0.5B-Instruct-q4f16_1-MLC', 'SmolLM2-360M-Instruct-q4f16_1-MLC', 'Llama-3.2-1B-Instruct-q4f16_1-MLC'],
+  chair: 'Llama-3.2-1B-Instruct-q4f16_1-MLC',
+};
+
+function seatsFit(seats: CouncilSeatDefaults): boolean {
+  return [...seats.members, seats.chair].every((id) => {
+    const model = AVAILABLE_MODELS.find((m) => m.id === id);
+    return !!model && fitsDevice(model);
+  });
+}
+
+/** Default Council line-up for this device: Alibaba, Hugging Face and Meta models. */
+export const DEFAULT_COUNCIL_SEATS: CouncilSeatDefaults = seatsFit(COUNCIL_DESKTOP)
+  ? COUNCIL_DESKTOP
+  : {
+      members: COUNCIL_PHONE.members.map(pickForDevice) as [string, string, string],
+      chair: pickForDevice(COUNCIL_PHONE.chair),
+    };
