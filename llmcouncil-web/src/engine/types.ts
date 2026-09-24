@@ -50,19 +50,3 @@ export interface EngineModelOption {
   description: string;
   recommended?: boolean;
 }
-
-export interface WebLLMChatbotOptions {
-  modelId?: string;
-  searchApiKey?: string;
-  searchProvider?: SearchProvider;
-  /** Maximum number of grounding sources to retrieve per query. */
-  maxSources?: number;
-}
-
-export interface SendMessageResult {
-  fullText: string;
-  /** The raw text with the trailing "Confidence Level: [..]" tag stripped, for cleaner rendering. */
-  answer: string;
-  sources: SearchResult[];
-  confidence: ConfidenceLevel | null;
-}

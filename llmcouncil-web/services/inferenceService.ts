@@ -253,6 +253,68 @@ export const analyzeWithAgent = async (
   return { ...result, text: sanitizePII(result.text) };
 };
 
+/**
+ * Quick mode: a single model answers directly, grounded in the retrieved sources with
+ * an inline-cited, confidence-tagged reply -- the same promise the old, webllm-only
+ * Local Assistant made, now open to any provider. Unlike the Council's cloud seats
+ * (which answer from the model's own knowledge, trusting a frontier model's training
+ * data over a forced web search), Quick mode always grounds, since a single ungrounded
+ * answer with no other perspective to catch a mistake is the case most worth citing.
+ */
+export const answerDirectly = async (
+  query: string,
+  model: ModelQuota,
+  mode: AnswerMode,
+  hooks?: LocalRunHooks
+): Promise<{ report: ConsensusReport; usage?: TokenUsage; resolvedModelId?: string }> => {
+  if (model.providerType === 'webllm') {
+    const budget = localBudget(query, mode);
+    const systemPrompt = [
+      'You are a strict fact-grounding rewriter.',
+      GROUNDING_RULES,
+      CONFIDENCE_RULE,
+      `SOURCES:\n${formatSources(hooks?.sources ?? [], budget.remaining)}`,
+    ].join('\n\n');
+    const { text: raw, resolvedModelId } = await runLocal(model, systemPrompt, budget.query, mode, hooks);
+    const { answer, confidence } = parseGroundedOutput(raw);
+    if (!answer) throw new Error(`${model.label} returned an empty answer.`);
+    return {
+      report: { comprehensiveAnswer: answer, confidence },
+      resolvedModelId: resolvedModelId !== model.id ? resolvedModelId : undefined,
+    };
+  }
+
+  // Cloud providers have far more room than the local context budget, so the sources
+  // aren't trimmed beyond formatSources's own per-source split.
+  const prompt = [
+    GROUNDING_RULES,
+    CONFIDENCE_RULE,
+    `SOURCES:\n${formatSources(hooks?.sources ?? [])}`,
+    `\nQuestion: "${query}"`,
+  ].join('\n\n');
+
+  let result: AgentResult;
+  if (model.providerType === 'native-gemini') {
+    const ai = geminiClient(model);
+    const thinkingBudget = mode === 'complex' ? 24576 : 0;
+    const response = await ai.models.generateContent({
+      model: model.id,
+      contents: prompt,
+      config: thinkingBudget > 0 ? { thinkingConfig: { thinkingBudget } } : {},
+    });
+    if (!response.text) throw new Error(`${model.label} returned no answer.`);
+    result = { text: response.text, usage: extractUsage(response) };
+  } else if (model.providerType === 'anthropic') {
+    result = await callAnthropic(model, prompt);
+  } else {
+    result = await callOpenAICompatible(model, prompt);
+  }
+
+  const { answer, confidence } = parseGroundedOutput(sanitizePII(result.text));
+  if (!answer) throw new Error(`${model.label} returned an empty answer.`);
+  return { report: { comprehensiveAnswer: answer, confidence }, usage: result.usage };
+};
+
 export const synthesizeConsensus = async (
   query: string,
   analyses: AgentAnalysis[],

@@ -1,7 +1,8 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { AgentRole, type ModelQuota, type ConnectionStatus, type ProviderMetadata, type ModelCategory, type AnswerMode } from '../types';
-import { BrainCircuitIcon, PaperAirplaneIcon, ShieldIcon, InfoIcon, CloseIcon } from './icons';
-import { AVAILABLE_MODELS, fitsDevice } from '../src/engine/models';
+import type { AppMode } from './ModeSwitcher';
+import { BrainCircuitIcon, PaperAirplaneIcon, ShieldIcon, InfoIcon, CloseIcon, GlobeIcon } from './icons';
+import { AVAILABLE_MODELS, fitsDevice, getDeviceProfile } from '../src/engine/models';
 import { BUILTIN_GEMINI_KEY } from '../services/inferenceService';
 
 export const PROVIDERS: ProviderMetadata[] = [
@@ -198,6 +199,7 @@ const ModelInfoTooltip: React.FC<{ model: ModelQuota; provider?: ProviderMetadat
 );
 
 interface InputPanelProps {
+  mode: AppMode;
   query: string;
   setQuery: (q: string) => void;
   handleSubmit: () => void;
@@ -213,15 +215,19 @@ interface InputPanelProps {
   setAnswerMode: (m: AnswerMode) => void;
   registry: ModelQuota[];
   setRegistry: React.Dispatch<React.SetStateAction<ModelQuota[]>>;
+  searchApiKey: string;
+  setSearchApiKey: (key: string) => void;
 }
 
 export const isSelectableModel = (m: ModelQuota): boolean => m.connectionStatus === 'connected' || !!m.isSystemModel;
 
 const COUNCIL_SEATS = [AgentRole.Model1, AgentRole.Model2, AgentRole.Chairperson];
+const QUICK_SEATS = [AgentRole.Model1];
 
 const InputPanel: React.FC<InputPanelProps> = ({
-  query, setQuery, handleSubmit, handleCancel, isLoading, useAutomation, setUseAutomation, selectedModels, onModelChange, requestCounts, onShowCancel, answerMode, setAnswerMode, registry, setRegistry
+  mode, query, setQuery, handleSubmit, handleCancel, isLoading, useAutomation, setUseAutomation, selectedModels, onModelChange, requestCounts, onShowCancel, answerMode, setAnswerMode, registry, setRegistry, searchApiKey, setSearchApiKey
 }) => {
+  const seats = mode === 'quick' ? QUICK_SEATS : COUNCIL_SEATS;
   const [activeTab, setActiveTab] = useState<'mission' | 'hub'>('mission');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<ModelCategory>('All');
@@ -392,7 +398,7 @@ const InputPanel: React.FC<InputPanelProps> = ({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <PaperAirplaneIcon className="w-5 h-5 text-violet-500 rotate-45" />
-              <h2 className="text-xl font-black text-white uppercase tracking-tight">Council Signal</h2>
+              <h2 className="text-xl font-black text-white uppercase tracking-tight">{mode === 'quick' ? 'Quick Signal' : 'Council Signal'}</h2>
             </div>
             
             {/* Answer Mode Toggle */}
@@ -414,15 +420,17 @@ const InputPanel: React.FC<InputPanelProps> = ({
           
           <textarea
             value={query} onChange={(e) => setQuery(e.target.value)}
-            placeholder="Input objective for parallel deliberation..."
+            placeholder={mode === 'quick' ? 'Ask a question for a single grounded, cited answer...' : 'Input objective for parallel deliberation...'}
             className="w-full h-44 bg-slate-950/80 border border-slate-800 rounded-3xl p-6 text-sm text-slate-100 focus:ring-2 focus:ring-violet-500/50 outline-none resize-none transition-all shadow-inner placeholder:text-slate-800"
             disabled={isLoading}
           />
           <div className="space-y-6">
             <div className="grid grid-cols-1 gap-4">
-              {COUNCIL_SEATS.map(role => (
+              {seats.map(role => (
                 <div key={role} className="space-y-2">
-                   <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">{role === AgentRole.Chairperson ? 'Chairperson' : `${role} Specialist`}</label>
+                   <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">
+                     {mode === 'quick' ? 'Model' : role === AgentRole.Chairperson ? 'Chairperson' : `${role} Specialist`}
+                   </label>
                    <select 
                       value={selectedModels[role]} 
                       onChange={(e) => onModelChange(role, e.target.value)}
@@ -434,22 +442,39 @@ const InputPanel: React.FC<InputPanelProps> = ({
                    </select>
                 </div>
               ))}
-              {new Set(COUNCIL_SEATS.map(r => selectedModels[r])).size < COUNCIL_SEATS.length && (
+              {mode === 'council' && new Set(seats.map(r => selectedModels[r])).size < seats.length && (
                 <p className="text-[10px] text-amber-300/90 leading-relaxed ml-1">
                   Pick three different models: two to deliberate and a third, distinct one for Final Arbitration.
                   A model debating itself, or arbitrating its own answer, mostly agrees with itself.
                 </p>
               )}
               <p className="text-[9px] text-slate-600 leading-relaxed ml-1">
-                In-browser seats run on your GPU with no API key. Each different model is downloaded once, then loaded from the browser cache; they take turns, so a run swaps between them. Cloud models appear here once you add a key in the Model Hub.
+                {mode === 'quick'
+                  ? 'In-browser runs on your GPU with no API key, downloaded once and cached. Cloud models appear here once you add a key in the Model Hub.'
+                  : 'In-browser seats run on your GPU with no API key. Each different model is downloaded once, then loaded from the browser cache; they take turns, so a run swaps between them. Cloud models appear here once you add a key in the Model Hub.'}
+              </p>
+            </div>
+            <div className="space-y-2 border-t border-slate-800/60 pt-6">
+              <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2">
+                <GlobeIcon className="w-3 h-3" /> Web Search (optional)
+              </label>
+              <input
+                type="password"
+                value={searchApiKey}
+                onChange={(e) => setSearchApiKey(e.target.value)}
+                placeholder="Tavily or Brave API key"
+                className="w-full bg-slate-950/50 border border-slate-800 rounded-xl p-3 text-[11px] text-violet-300 font-mono outline-none focus:border-emerald-500/50 transition-all"
+              />
+              <p className="text-[9px] text-slate-600 leading-relaxed ml-1">
+                Grounds every answer in real, cited web results. Leave blank to use the free, keyless Wikipedia and DuckDuckGo fallback.
               </p>
             </div>
             <button onClick={handleSubmit} disabled={isLoading || !query.trim()} className="w-full py-4.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-black rounded-[1.5rem] transition-all uppercase tracking-[0.2em] text-[11px] shadow-xl active:scale-95">
-              {isLoading ? 'Signal Processing...' : 'Invoke Universal Council'}
+              {isLoading ? 'Signal Processing...' : mode === 'quick' ? 'Get Quick Answer' : 'Invoke Council'}
             </button>
             {isLoading && (
               <button onClick={onShowCancel} className="w-full py-3 bg-transparent border border-rose-500/30 hover:bg-rose-500/10 text-rose-400 font-black rounded-[1.5rem] transition-all uppercase tracking-[0.2em] text-[10px]">
-                Stop Council
+                Stop
               </button>
             )}
           </div>
@@ -469,7 +494,13 @@ const InputPanel: React.FC<InputPanelProps> = ({
           </div>
           <div className="flex flex-col gap-3 overflow-y-auto pr-1 custom-scrollbar flex-grow">
             {[
-              { title: 'On this device', note: 'Free, private, no key. These run the Council by default.', models: filteredModels.filter(m => m.providerType === 'webllm') },
+              {
+                title: 'On this device',
+                note: getDeviceProfile().constrained
+                  ? 'Free, private, no key. This looks like a phone or tablet, so only models that fit its browser memory are listed -- others would crash the tab.'
+                  : 'Free, private, no key. These run Quick answers and the Council by default.',
+                models: filteredModels.filter(m => m.providerType === 'webllm'),
+              },
               { title: 'Cloud and self-hosted (optional)', note: 'Only used if you add your own API key or run a local server. Nothing is sent to them otherwise.', models: filteredModels.filter(m => m.providerType !== 'webllm') },
             ].filter(section => section.models.length > 0).map(section => (
               <div key={section.title} className="flex flex-col gap-3 mt-2 first:mt-0">
