@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, Suspense, lazy } from 'react';
 import { AgentRole, type AgentAnalysis, type ConsensusReport, type ModelQuota, type AnswerMode } from './types';
-import { analyzeWithAgent, synthesizeConsensus, sanitizeText, type LocalRunHooks } from './services/inferenceService';
+import { analyzeWithAgent, cancelLocalGenerations, synthesizeConsensus, sanitizeText, type LocalRunHooks } from './services/inferenceService';
 import InputPanel, { INITIAL_MODELS, isSelectableModel } from './components/TicketInputForm';
 import CouncilView from './components/CouncilView';
 import ConsensusDashboard from './components/ConsensusDashboard';
@@ -79,7 +79,10 @@ const App: React.FC = () => {
   const [answerMode, setAnswerMode] = useState<AnswerMode>('complex');
   const [sources, setSources] = useState<SearchResult[]>([]);
   const [engineProgress, setEngineProgress] = useState<EngineProgress | null>(null);
-  const isCancelledRef = useRef(false);
+  // Each run takes a new id; a run whose id is no longer current (aborted, or
+  // superseded by a newer run) must not touch state, so its late results can never
+  // overwrite a newer run's.
+  const runIdRef = useRef(0);
 
   const [selectedModelIds, setSelectedModelIds] = useState<Record<AgentRole, string>>(() => loadSelections(INITIAL_MODELS));
 
@@ -127,7 +130,8 @@ const App: React.FC = () => {
     setSources([]);
     setEngineProgress(null);
     setAgentAnalyses(prev => prev.map(a => ({ ...a, status: 'idle', analysis: '', usage: undefined })));
-    isCancelledRef.current = false;
+    const runId = ++runIdRef.current;
+    const isStale = () => runIdRef.current !== runId;
 
     try {
       const { text: cleanQuery } = sanitizeText(query);
@@ -152,12 +156,14 @@ const App: React.FC = () => {
       let grounding: SearchResult[] = [];
       if (usesLocal) {
         grounding = await retrieveSources(cleanQuery);
-        if (isCancelledRef.current) return;
+        if (isStale()) return;
         setSources(grounding);
       }
       const hooks: LocalRunHooks = {
         sources: grounding,
-        onProgress: (text, fraction) => setEngineProgress(fraction !== undefined && fraction >= 1 ? null : { text, fraction }),
+        onProgress: (text, fraction) => {
+          if (!isStale()) setEngineProgress(fraction !== undefined && fraction >= 1 ? null : { text, fraction });
+        },
       };
 
       const promises = COUNCIL_ROLES.map(async (role) => {
@@ -172,8 +178,8 @@ const App: React.FC = () => {
       });
 
       const results = await Promise.all(promises);
+      if (isStale()) return;
       setEngineProgress(null);
-      if (isCancelledRef.current) return;
 
       setAgentAnalyses(prev => prev.map(agent => {
         const res = results.find(r => r.role === agent.role);
@@ -190,21 +196,33 @@ const App: React.FC = () => {
       updateAgent(AgentRole.Chairperson, { status: 'thinking', modelName: chairModel.id, providerType: chairModel.providerType });
       try {
         const { report, usage } = await synthesizeConsensus(cleanQuery, successfulResults, answerMode, chairModel, hooks);
-        if (isCancelledRef.current) return;
+        if (isStale()) return;
         setConsensus(report);
         updateAgent(AgentRole.Chairperson, { status: 'done', usage });
       } catch (e) {
+        if (isStale()) return;
         const message = (e as Error).message;
         updateAgent(AgentRole.Chairperson, { status: 'error', analysis: message });
         setError(`Chairperson: ${message}`);
       }
     } catch (e) {
-      setError((e as Error).message);
+      if (!isStale()) setError((e as Error).message);
     } finally {
-      setEngineProgress(null);
-      setIsLoading(false);
+      if (!isStale()) {
+        setEngineProgress(null);
+        setIsLoading(false);
+      }
     }
   }, [query, selectedModelIds, registry, answerMode, isLoading]);
+
+  const handleAbort = () => {
+    runIdRef.current++;
+    cancelLocalGenerations();
+    setIsLoading(false);
+    setEngineProgress(null);
+    setShowCancelConfirm(false);
+    setAgentAnalyses(prev => prev.map(a => (a.status === 'thinking' ? { ...a, status: 'idle' } : a)));
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 p-6 sm:p-12 flex justify-center selection:bg-violet-500/30">
@@ -215,7 +233,7 @@ const App: React.FC = () => {
             <p className="text-xs text-slate-500 mb-8 leading-relaxed text-center px-4">Deliberation will be terminated immediately. Credentials remain safe.</p>
             <div className="flex gap-4">
               <button onClick={() => setShowCancelConfirm(false)} className="flex-1 py-4 text-[11px] font-black uppercase bg-slate-800 rounded-xl text-slate-300 transition-all hover:bg-slate-700">Continue</button>
-              <button onClick={() => { isCancelledRef.current = true; setIsLoading(false); setShowCancelConfirm(false); }} className="flex-1 py-4 text-[11px] font-black uppercase bg-rose-600 rounded-xl text-white transition-all hover:bg-rose-500">Abort Run</button>
+              <button onClick={handleAbort} className="flex-1 py-4 text-[11px] font-black uppercase bg-rose-600 rounded-xl text-white transition-all hover:bg-rose-500">Abort Run</button>
             </div>
           </div>
         </div>

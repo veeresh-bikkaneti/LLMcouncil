@@ -10,10 +10,36 @@ const CONFIDENCE_TAG_RE = /[\s*_]*Confidence Level[\s*_]*:[\s*_]*\[?\s*(High|Med
 // ahead of their real answer; it must never reach the rendered answer.
 const THINK_BLOCK_RE = /<think>[\s\S]*?<\/think>/gi;
 
-export function formatSources(sources: SearchResult[]): string {
-  return sources.length
-    ? sources.map((s) => `[${s.id}] ${s.title}\nURL: ${s.url}\nEXCERPT: ${s.content}`).join('\n\n')
-    : '(No sources were retrieved for this query. Say so plainly instead of guessing.)';
+// Every WebLLM model this app ships has a 4096-token context window (per
+// prebuiltAppConfig). Prompt plus reply must fit in it, or WebLLM throws
+// ContextWindowSizeExceededError instead of answering.
+const LOCAL_CONTEXT_TOKENS = 4096;
+// Deliberately pessimistic for English (~4 chars/token is typical), so the estimate
+// errs toward cutting a little too much rather than overflowing.
+const CHARS_PER_TOKEN = 3.5;
+// Fixed instructions around the variable content (rules, persona, wrapper text,
+// chat template), with headroom for text that tokenizes worse than English.
+const PROMPT_OVERHEAD_TOKENS = 700;
+
+/** Characters of variable prompt content that fit alongside a reply of `maxTokens`. */
+export function localInputBudgetChars(maxTokens: number): number {
+  return Math.floor((LOCAL_CONTEXT_TOKENS - maxTokens - PROMPT_OVERHEAD_TOKENS) * CHARS_PER_TOKEN);
+}
+
+export function truncate(text: string, maxChars: number): string {
+  return text.length <= maxChars ? text : `${text.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+}
+
+/** Formats sources for a prompt, splitting `maxTotalChars` evenly across them. */
+export function formatSources(sources: SearchResult[], maxTotalChars = Infinity): string {
+  if (!sources.length) return '(No sources were retrieved for this query. Say so plainly instead of guessing.)';
+  const perSource = maxTotalChars / sources.length;
+  return sources
+    .map((s) => {
+      const header = `[${s.id}] ${s.title}\nURL: ${s.url}\nEXCERPT: `;
+      return header + truncate(s.content, Math.max(80, Math.floor(perSource - header.length)));
+    })
+    .join('\n\n');
 }
 
 export const GROUNDING_RULES = [

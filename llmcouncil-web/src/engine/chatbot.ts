@@ -1,11 +1,13 @@
 import { executeWebSearch } from './search';
 import { sanitizePII } from './sanitize';
 import { generate, loadModel, type ProgressFn } from './engineManager';
-import { CONFIDENCE_RULE, formatSources, GROUNDING_RULES, parseGroundedOutput } from './grounding';
+import { CONFIDENCE_RULE, formatSources, GROUNDING_RULES, localInputBudgetChars, parseGroundedOutput, truncate } from './grounding';
 import { DEFAULT_MODEL_ID } from './models';
 import type { SearchResult, SendMessageResult, WebLLMChatbotOptions } from './types';
 
 export { AVAILABLE_MODELS, DEFAULT_MODEL_ID, isWebGPUSupported } from './models';
+
+const MAX_REPLY_TOKENS = 900;
 
 /**
  * Generic JavaScript orchestrator around in-browser models. The model is never given
@@ -56,20 +58,23 @@ export class WebLLMChatbot {
 
     const safeQuery = sanitizePII(userQuery.trim());
     const sources = await this.executeWebSearch(safeQuery);
+    // Prompt plus reply must fit the model's 4096-token context window.
+    const budget = localInputBudgetChars(MAX_REPLY_TOKENS);
+    const promptQuery = truncate(safeQuery, Math.floor(budget * 0.25));
     const systemPrompt = [
       'You are a strict fact-grounding rewriter.',
       GROUNDING_RULES,
       CONFIDENCE_RULE,
-      `SOURCES:\n${formatSources(sources)}`,
+      `SOURCES:\n${formatSources(sources, budget - promptQuery.length)}`,
     ].join('\n\n');
 
     const fullText = await generate(
       this.modelId,
       [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: safeQuery },
+        { role: 'user', content: promptQuery },
       ],
-      { temperature: 0, onToken }
+      { temperature: 0, maxTokens: MAX_REPLY_TOKENS, onToken }
     );
 
     const { answer, confidence } = parseGroundedOutput(fullText);

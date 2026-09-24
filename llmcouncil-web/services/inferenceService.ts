@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AgentRole, type AgentAnalysis, type TokenUsage, type ModelQuota, type AnswerMode, type ConsensusReport } from '../types';
 import { sanitizePII } from '../src/engine/sanitize';
-import { CONFIDENCE_RULE, formatSources, GROUNDING_RULES, parseGroundedOutput } from '../src/engine/grounding';
+import { CONFIDENCE_RULE, formatSources, GROUNDING_RULES, localInputBudgetChars, parseGroundedOutput, truncate } from '../src/engine/grounding';
 import type { SearchResult } from '../src/engine/types';
 
 // Only non-empty when the deployment was built with GEMINI_API_KEY set; Vite compiles
@@ -136,6 +136,22 @@ const LOCAL_PERSONA: Partial<Record<AgentRole, string>> = {
 // generations back to back on one engine.
 const LOCAL_MAX_TOKENS: Record<AnswerMode, number> = { simple: 320, complex: 900 };
 
+type EngineModule = typeof import('../src/engine/engineManager');
+let engineModule: EngineModule | null = null;
+
+/** Stops in-browser generations for an aborted run. A no-op until the engine is loaded. */
+export const cancelLocalGenerations = (): void => {
+  engineModule?.cancelPending();
+};
+
+/** Budgets for variable prompt content so a local prompt plus reply fits the model's context. */
+const localBudget = (query: string, mode: AnswerMode) => {
+  const total = localInputBudgetChars(LOCAL_MAX_TOKENS[mode]);
+  // A huge pasted query must not crowd out everything else.
+  const trimmedQuery = truncate(query, Math.floor(total * 0.25));
+  return { query: trimmedQuery, remaining: total - trimmedQuery.length };
+};
+
 const runLocal = async (
   model: ModelQuota,
   systemPrompt: string,
@@ -145,7 +161,8 @@ const runLocal = async (
 ): Promise<string> => {
   // Dynamic import keeps the ~6MB WebLLM runtime out of the main bundle until an
   // in-browser model is actually used.
-  const { generate } = await import('../src/engine/engineManager');
+  engineModule ??= await import('../src/engine/engineManager');
+  const { generate } = engineModule;
   return generate(
     model.id,
     [
@@ -164,12 +181,13 @@ export const analyzeWithAgent = async (
   hooks?: LocalRunHooks
 ): Promise<AgentResult> => {
   if (model.providerType === 'webllm') {
+    const budget = localBudget(query, mode);
     const systemPrompt = [
       LOCAL_PERSONA[role] ?? 'You are a member of an LLM council.',
       GROUNDING_RULES,
-      `SOURCES:\n${formatSources(hooks?.sources ?? [])}`,
+      `SOURCES:\n${formatSources(hooks?.sources ?? [], budget.remaining)}`,
     ].join('\n\n');
-    const { answer } = parseGroundedOutput(await runLocal(model, systemPrompt, query, mode, hooks));
+    const { answer } = parseGroundedOutput(await runLocal(model, systemPrompt, budget.query, mode, hooks));
     if (!answer) throw new Error(`${model.label} returned an empty answer.`);
     return { text: answer };
   }
@@ -217,14 +235,23 @@ export const synthesizeConsensus = async (
   const instruction = `Arbitrate and synthesize these multi-agent deliberations into a single superior consensus for: "${query}"`;
 
   if (chairModel.providerType === 'webllm') {
+    // The Chairperson sees the sources AND every member's answer, which easily
+    // overflows a 4096-token window untrimmed. Split the budget between them.
+    const budget = localBudget(query, mode);
+    const sourceChars = Math.floor(budget.remaining * 0.4);
+    const perPerspective = Math.floor((budget.remaining - sourceChars) / Math.max(1, analyses.length));
+    const localPerspectives = analyses
+      .map(a => `## [${a.role} (${a.modelName})]\n${truncate(a.analysis, perPerspective)}`)
+      .join('\n\n');
     const systemPrompt = [
       "You are the Chairperson of an LLM council. Reconcile the members' perspectives into one answer, " +
         'resolving any disagreement in favour of what the sources support.',
       GROUNDING_RULES,
       CONFIDENCE_RULE,
-      `SOURCES:\n${formatSources(hooks?.sources ?? [])}`,
+      `SOURCES:\n${formatSources(hooks?.sources ?? [], sourceChars)}`,
     ].join('\n\n');
-    const raw = await runLocal(chairModel, systemPrompt, `${instruction}\n\n${perspectives}`, mode, hooks);
+    const localInstruction = `Arbitrate and synthesize these multi-agent deliberations into a single superior consensus for: "${budget.query}"`;
+    const raw = await runLocal(chairModel, systemPrompt, `${localInstruction}\n\n${localPerspectives}`, mode, hooks);
     const { answer, confidence } = parseGroundedOutput(raw);
     if (!answer) throw new Error(`${chairModel.label} returned an empty synthesis.`);
     return { report: { comprehensiveAnswer: answer, confidence } };

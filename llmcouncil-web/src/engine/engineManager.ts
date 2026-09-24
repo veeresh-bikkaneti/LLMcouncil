@@ -18,6 +18,17 @@ let engineModelId: string | null = null;
 // concurrent requests, and a model swap must never happen mid-generation.
 let queue: Promise<unknown> = Promise.resolve();
 
+// Bumped by cancelPending(). A queued generation captures the value when it's
+// enqueued and refuses to start if it has changed since.
+let cancelEpoch = 0;
+
+export class GenerationCancelledError extends Error {
+  constructor() {
+    super('Generation cancelled.');
+    this.name = 'GenerationCancelledError';
+  }
+}
+
 function enqueue<T>(task: () => Promise<T>): Promise<T> {
   const run = queue.then(task, task);
   queue = run.catch(() => undefined);
@@ -81,8 +92,12 @@ export function generate(
   messages: ChatCompletionMessageParam[],
   opts: GenerateOptions = {}
 ): Promise<string> {
+  const epoch = cancelEpoch;
   return enqueue(async () => {
+    if (epoch !== cancelEpoch) throw new GenerationCancelledError();
     const active = await ensureEngine(modelId, opts.onProgress);
+    // A model download can take minutes; the run may have been aborted meanwhile.
+    if (epoch !== cancelEpoch) throw new GenerationCancelledError();
     const stream = await active.chat.completions.create({
       messages,
       temperature: opts.temperature ?? 0,
@@ -100,4 +115,10 @@ export function generate(
     }
     return text;
   });
+}
+
+/** Stops the generation in progress and drops every one still queued behind it. */
+export function cancelPending(): void {
+  cancelEpoch++;
+  engine?.interruptGenerate();
 }
