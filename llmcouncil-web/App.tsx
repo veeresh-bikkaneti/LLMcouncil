@@ -12,9 +12,16 @@ import { LogoIcon } from './components/icons';
 const GroundedAssistant = lazy(() => import('./components/GroundedAssistant'));
 
 const STORAGE_KEY = 'llm_council_selections_v3';
+const MODE_STORAGE_KEY = 'llm_council_mode_v1';
 
 const App: React.FC = () => {
-  const [mode, setMode] = useState<AppMode>('council');
+  // Default to Local Assistant: the whole point of that mode is that it works with
+  // zero cloud API key, so that's what a first-time visitor should land on rather
+  // than a cloud-backed Council view they can't use without their own keys.
+  const [mode, setMode] = useState<AppMode>(() => {
+    const saved = localStorage.getItem(MODE_STORAGE_KEY);
+    return saved === 'council' || saved === 'local' ? saved : 'local';
+  });
   const [query, setQuery] = useState<string>('');
   const [useAutomation, setUseAutomation] = useState<boolean>(true);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -43,6 +50,10 @@ const App: React.FC = () => {
       [AgentRole.Chairperson]: 'gemini-3-pro-preview',
     };
   });
+
+  useEffect(() => {
+    localStorage.setItem(MODE_STORAGE_KEY, mode);
+  }, [mode]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(selectedModelIds));
