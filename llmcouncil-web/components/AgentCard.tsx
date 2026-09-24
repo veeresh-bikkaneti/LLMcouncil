@@ -84,7 +84,7 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, onAnalysisChange, useAutom
               </div>
             </div>
           )}
-          {useAutomation && (
+          {useAutomation && quota && quota.providerType !== 'webllm' && (
             <div className="p-5 bg-slate-950/50 border border-slate-800/60 rounded-2xl space-y-4 shadow-inner">
               <div className="flex justify-between text-[9px] font-black uppercase tracking-widest leading-none">
                 <span className="text-slate-600">Model Quota: {spent}/{limit}</span>

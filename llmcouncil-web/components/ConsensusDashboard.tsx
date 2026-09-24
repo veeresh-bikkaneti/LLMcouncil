@@ -2,6 +2,8 @@ import React from 'react';
 import { ConsensusReport, AgentAnalysis, type TokenUsage } from '../types';
 import { ChairpersonIcon, DownloadIcon } from './icons';
 import { Markdown } from './Markdown';
+import { sanitizePII } from '../src/engine/sanitize';
+import type { SearchResult } from '../src/engine/types';
 
 interface ConsensusDashboardProps {
   consensus: ConsensusReport | null;
@@ -9,7 +11,15 @@ interface ConsensusDashboardProps {
   chairpersonUsage?: TokenUsage;
   originalQuery: string;
   agentAnalyses: AgentAnalysis[];
+  chairModelLabel: string;
+  sources: SearchResult[];
 }
+
+const CONFIDENCE_STYLE: Record<'High' | 'Medium' | 'Low', string> = {
+  High: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/5',
+  Medium: 'text-amber-400 border-amber-500/30 bg-amber-500/5',
+  Low: 'text-rose-400 border-rose-500/30 bg-rose-500/5',
+};
 
 const STATUS_LABEL: Record<AgentAnalysis['status'], string> = {
   idle: 'Waiting for Council',
@@ -25,15 +35,15 @@ const STATUS_STYLE: Record<AgentAnalysis['status'], string> = {
   error: 'text-amber-500 border-amber-500/30 bg-amber-500/5',
 };
 
-const ConsensusDashboard: React.FC<ConsensusDashboardProps> = ({ consensus, chairpersonStatus, chairpersonUsage, originalQuery, agentAnalyses }) => {
-  const modelName = 'gemini-3-pro-preview';
+const ConsensusDashboard: React.FC<ConsensusDashboardProps> = ({ consensus, chairpersonStatus, chairpersonUsage, originalQuery, agentAnalyses, chairModelLabel, sources }) => {
+  const modelName = chairModelLabel;
 
   const handleDownload = () => {
     if (!consensus) return;
     
     let reportText = `LLM COUNCIL: DELIBERATION REPORT\n`;
     reportText += `===============================\n\n`;
-    reportText += `ORIGINAL SIGNAL:\n"${originalQuery}"\n\n`;
+    reportText += `ORIGINAL SIGNAL:\n"${sanitizePII(originalQuery)}"\n\n`;
     reportText += `-------------------------------\n`;
     reportText += `COUNCIL PERSPECTIVES:\n`;
     
@@ -52,6 +62,12 @@ const ConsensusDashboard: React.FC<ConsensusDashboardProps> = ({ consensus, chai
     reportText += `FINAL ARBITRATION:\n`;
     reportText += `Model: ${modelName}\n`;
     reportText += `Synthesis:\n${consensus.comprehensiveAnswer}\n\n`;
+    if (consensus.confidence) {
+        reportText += `Confidence: ${consensus.confidence}\n`;
+    }
+    if (sources.length) {
+        reportText += `\nSOURCES:\n${sources.map(src => `[${src.id}] ${src.title} - ${src.url}`).join('\n')}\n`;
+    }
     
     if (chairpersonUsage) {
         reportText += `Arbitration Cost: ${chairpersonUsage.totalTokens} Tokens\n`;
@@ -106,7 +122,30 @@ const ConsensusDashboard: React.FC<ConsensusDashboardProps> = ({ consensus, chai
                 <ChairpersonIcon className="w-56 h-56" />
             </div>
             <div className="relative z-10">
+                {consensus.confidence && (
+                  <span className={`inline-block mb-6 text-[10px] font-black px-3 py-1.5 rounded-xl uppercase tracking-widest border ${CONFIDENCE_STYLE[consensus.confidence]}`}>
+                    Confidence: {consensus.confidence}
+                  </span>
+                )}
                 <Markdown text={consensus.comprehensiveAnswer} />
+                {sources.length > 0 && (
+                  <div className="mt-10 pt-6 border-t border-slate-800/60 space-y-2">
+                    <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600 mb-3">Grounding Sources</p>
+                    {sources.map(src => (
+                      <a
+                        key={src.id}
+                        href={src.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-baseline gap-3 text-[12px] text-slate-400 hover:text-violet-300 transition-colors"
+                      >
+                        <span className="text-violet-400 font-black">[{src.id}]</span>
+                        <span className="truncate">{src.title}</span>
+                        <span className="text-[9px] uppercase tracking-widest text-slate-700 flex-shrink-0">{src.source}</span>
+                      </a>
+                    ))}
+                  </div>
+                )}
                 <div className="mt-12 flex justify-end">
                   <button 
                     onClick={handleDownload}
