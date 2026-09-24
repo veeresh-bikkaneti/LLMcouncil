@@ -57,12 +57,21 @@ export class DeviceTooSmallError extends Error {
   }
 }
 
+/** Thrown when the GPU itself rejects or loses a model while CreateMLCEngine is
+ *  actually running. Unlike DeviceTooSmallError's static, deterministic check, this
+ *  can be a one-off hiccup, so ensureEngine gives the same model one retry first. */
+export class GpuLoadFailedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GpuLoadFailedError';
+  }
+}
+
 /** Whether trying a smaller model is a reasonable response to this failure. A plain
  *  network/fetch error or "no GPU adapter at all" isn't -- a smaller download or a
  *  smaller model doesn't fix either of those. */
 function isStepDownWorthy(e: unknown): boolean {
-  const detail = (e as Error)?.message || String(e);
-  return e instanceof DeviceTooSmallError || isGpuLoss(e) || /out of memory/i.test(detail);
+  return e instanceof DeviceTooSmallError || e instanceof GpuLoadFailedError;
 }
 
 const gpuLostMessage = (retried: boolean) =>
@@ -141,7 +150,7 @@ async function loadOnce(modelId: string, onProgress?: ProgressFn): Promise<MLCEn
   } catch (e) {
     const detail = (e as Error).message || String(e);
     if (isGpuLoss(e) || /out of memory/i.test(detail)) {
-      throw new DeviceTooSmallError('The GPU ran out of memory loading this model.');
+      throw new GpuLoadFailedError('The GPU ran out of memory loading this model.');
     }
     if (/fetch/i.test(detail)) {
       throw new Error(
@@ -164,7 +173,13 @@ async function loadOnce(modelId: string, onProgress?: ProgressFn): Promise<MLCEn
 async function ensureEngine(
   modelId: string,
   onProgress?: ProgressFn,
-  onResolved?: (resolvedModelId: string) => void
+  onResolved?: (resolvedModelId: string) => void,
+  // Models other seats in the same Council run already resolved to. Only consulted
+  // when *stepping down* (never blocks the first attempt at `modelId` itself, which
+  // may deliberately be a seat the user set to match another one -- that's their
+  // call, already flagged by the UI's diversity hint), so an automatic step-down
+  // never has two seats silently converge on the same model.
+  excludeModelIds?: ReadonlySet<string>
 ): Promise<MLCEngineInterface> {
   if (engine && engineModelId === modelId) {
     onResolved?.(modelId);
@@ -177,7 +192,8 @@ async function ensureEngine(
     );
   }
 
-  const tried = new Set<string>();
+  const tried = new Set<string>(excludeModelIds);
+  const retriedOnce = new Set<string>();
   let candidateId = modelId;
   for (;;) {
     tried.add(candidateId);
@@ -187,6 +203,14 @@ async function ensureEngine(
       return loaded;
     } catch (e) {
       if (!isStepDownWorthy(e)) throw e;
+      // The static "too big" check is deterministic -- retrying the same model can't
+      // change its answer. A GPU rejecting or losing a model during load might be a
+      // one-off hiccup though, so give it one retry before giving up on it, the same
+      // grace generate() already gives a loss mid-stream.
+      if (e instanceof GpuLoadFailedError && !retriedOnce.has(candidateId)) {
+        retriedOnce.add(candidateId);
+        continue;
+      }
       const next = nextSmaller(candidateId, tried);
       if (!next) {
         const label = AVAILABLE_MODELS.find((m) => m.id === modelId)?.label ?? modelId;
@@ -226,6 +250,9 @@ export interface GenerateOptions {
   /** Called once with the model actually loaded, which can differ from `modelId`
    *  passed to generate() if that one didn't fit this device (see ensureEngine). */
   onModelResolved?: (resolvedModelId: string) => void;
+  /** Models other seats in this run already resolved to, so an automatic step-down
+   *  never lands this seat on the same model as one of them (see ensureEngine). */
+  excludeModelIds?: ReadonlySet<string>;
 }
 
 /** Loads the model if needed, then streams one completion. Returns the full text. */
@@ -243,7 +270,7 @@ export function generate(
     // which would show the start of the answer twice.
     for (let attempt = 0; ; attempt++) {
       if (cancelled()) throw new GenerationCancelledError();
-      const active = await ensureEngine(modelId, opts.onProgress, opts.onModelResolved);
+      const active = await ensureEngine(modelId, opts.onProgress, opts.onModelResolved, opts.excludeModelIds);
       // A model download can take minutes; the run may have been aborted meanwhile.
       if (cancelled()) throw new GenerationCancelledError();
 

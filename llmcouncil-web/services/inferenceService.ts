@@ -158,7 +158,8 @@ const runLocal = async (
   systemPrompt: string,
   userPrompt: string,
   mode: AnswerMode,
-  hooks?: LocalRunHooks
+  hooks?: LocalRunHooks,
+  excludeModelIds?: ReadonlySet<string>
 ): Promise<{ text: string; resolvedModelId: string }> => {
   // Captured before the import: on a cold cache the engine chunk can take a while to
   // arrive, and an abort in the meantime must still cancel this generation.
@@ -180,6 +181,7 @@ const runLocal = async (
       maxTokens: LOCAL_MAX_TOKENS[mode],
       onProgress: hooks?.onProgress,
       onModelResolved: (id) => { resolvedModelId = id; },
+      excludeModelIds,
     }
   );
   return { text, resolvedModelId };
@@ -190,7 +192,10 @@ export const analyzeWithAgent = async (
   query: string,
   model: ModelQuota,
   mode: AnswerMode,
-  hooks?: LocalRunHooks
+  hooks?: LocalRunHooks,
+  // Models earlier seats in this Council run already resolved to, so this seat's
+  // own step-down (if it needs one) never lands on the same model as one of them.
+  excludeModelIds?: ReadonlySet<string>
 ): Promise<AgentResult> => {
   if (model.providerType === 'webllm') {
     const budget = localBudget(query, mode);
@@ -199,7 +204,7 @@ export const analyzeWithAgent = async (
       GROUNDING_RULES,
       `SOURCES:\n${formatSources(hooks?.sources ?? [], budget.remaining)}`,
     ].join('\n\n');
-    const { text: raw, resolvedModelId } = await runLocal(model, systemPrompt, budget.query, mode, hooks);
+    const { text: raw, resolvedModelId } = await runLocal(model, systemPrompt, budget.query, mode, hooks, excludeModelIds);
     const { answer } = parseGroundedOutput(raw);
     if (!answer) throw new Error(`${model.label} returned an empty answer.`);
     return { text: answer, resolvedModelId: resolvedModelId !== model.id ? resolvedModelId : undefined };
@@ -264,7 +269,11 @@ export const synthesizeConsensus = async (
       `SOURCES:\n${formatSources(hooks?.sources ?? [], sourceChars)}`,
     ].join('\n\n');
     const localInstruction = `Arbitrate and synthesize these multi-agent deliberations into a single superior consensus for: "${budget.query}"`;
-    const { text: raw, resolvedModelId } = await runLocal(chairModel, systemPrompt, `${localInstruction}\n\n${localPerspectives}`, mode, hooks);
+    // The members' resolved models (not necessarily what they were originally set
+    // to, if any of them stepped down) are excluded so the chair never converges on
+    // one of them if it needs to step down itself.
+    const memberModelIds = new Set(analyses.map((a) => a.modelName));
+    const { text: raw, resolvedModelId } = await runLocal(chairModel, systemPrompt, `${localInstruction}\n\n${localPerspectives}`, mode, hooks, memberModelIds);
     const { answer, confidence } = parseGroundedOutput(raw);
     if (!answer) throw new Error(`${chairModel.label} returned an empty synthesis.`);
     return {

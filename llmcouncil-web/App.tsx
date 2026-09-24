@@ -168,28 +168,27 @@ const App: React.FC = () => {
         },
       };
 
-      const promises = COUNCIL_ROLES.map(async (role) => {
+      // One shared engine backs every seat, so they can never truly run at once --
+      // engineManager's queue already serializes them. Awaiting one seat before
+      // starting the next (rather than Promise.all) makes that explicit, and gives
+      // each seat's step-down ladder (if it needs one) the models earlier seats
+      // already resolved to, so it can never converge on one of them.
+      const usedModelIds = new Set<string>();
+      const results: Array<Partial<AgentAnalysis> & { role: AgentRole }> = [];
+      for (const role of COUNCIL_ROLES) {
         const model = modelFor(role)!;
         updateAgent(role, { status: 'thinking', modelName: model.id, providerType: model.providerType });
         try {
-          const { text, usage, resolvedModelId } = await analyzeWithAgent(role, cleanQuery, model, answerMode, hooks);
-          return {
-            role,
-            analysis: text,
-            usage,
-            status: 'done' as const,
-            // The seat may have run on a smaller model than selected, if the chosen
-            // one didn't fit this device (see engineManager's step-down ladder).
-            modelName: resolvedModelId ?? model.id,
-            providerType: model.providerType,
-            prompt: cleanQuery,
-          };
+          const { text, usage, resolvedModelId } = await analyzeWithAgent(role, cleanQuery, model, answerMode, hooks, usedModelIds);
+          // The seat may have run on a smaller model than selected, if the chosen
+          // one didn't fit this device (see engineManager's step-down ladder).
+          const finalModelId = resolvedModelId ?? model.id;
+          usedModelIds.add(finalModelId);
+          results.push({ role, analysis: text, usage, status: 'done', modelName: finalModelId, providerType: model.providerType, prompt: cleanQuery });
         } catch (e) {
-          return { role, analysis: (e as Error).message, status: 'error' as const, modelName: model.id, providerType: model.providerType, prompt: cleanQuery };
+          results.push({ role, analysis: (e as Error).message, status: 'error', modelName: model.id, providerType: model.providerType, prompt: cleanQuery });
         }
-      });
-
-      const results = await Promise.all(promises);
+      }
       if (isStale()) return;
       setEngineProgress(null);
 
@@ -197,6 +196,17 @@ const App: React.FC = () => {
         const res = results.find(r => r.role === agent.role);
         return res ? { ...agent, ...res } : agent;
       }));
+      // Selections follow what actually ran, so the pickers stop offering a model
+      // this device can't load, and the next run starts from what already worked
+      // instead of re-discovering it through the same step-downs again.
+      setSelectedModelIds(prev => {
+        const next = { ...prev };
+        let changed = false;
+        for (const r of results) {
+          if (r.modelName && r.modelName !== prev[r.role]) { next[r.role] = r.modelName; changed = true; }
+        }
+        return changed ? next : prev;
+      });
 
       const successfulResults = results.filter(r => r.status === 'done') as unknown as AgentAnalysis[];
       if (successfulResults.length === 0) {
@@ -211,6 +221,9 @@ const App: React.FC = () => {
         if (isStale()) return;
         setConsensus(report);
         updateAgent(AgentRole.Chairperson, { status: 'done', usage, ...(resolvedModelId ? { modelName: resolvedModelId } : {}) });
+        if (resolvedModelId && resolvedModelId !== chairModel.id) {
+          setSelectedModelIds(prev => ({ ...prev, [AgentRole.Chairperson]: resolvedModelId }));
+        }
       } catch (e) {
         if (isStale()) return;
         const message = (e as Error).message;
