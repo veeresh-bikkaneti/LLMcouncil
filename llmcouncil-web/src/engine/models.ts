@@ -242,3 +242,15 @@ export const DEFAULT_COUNCIL_SEATS: CouncilSeatDefaults = seatsFit(COUNCIL_DESKT
       members: COUNCIL_PHONE.members.map(pickForDevice) as [string, string],
       chair: pickForDevice(COUNCIL_PHONE.chair),
     };
+
+// The "3 distinct models" property is a config-time invariant, not something the
+// types enforce: pickForDevice() can fall back to the same shared default for more
+// than one seat if a future model resize or an added constrained tier makes that
+// the only fit. Fail loudly at load rather than silently running a Council where
+// the "arbitrator" is actually one of the two members debating itself.
+if (DEFAULT_COUNCIL_SEATS.members.includes(DEFAULT_COUNCIL_SEATS.chair)) {
+  throw new Error(
+    `Council config invariant violated: chair (${DEFAULT_COUNCIL_SEATS.chair}) must not be one of the ` +
+      `deliberating members (${DEFAULT_COUNCIL_SEATS.members.join(', ')}).`
+  );
+}

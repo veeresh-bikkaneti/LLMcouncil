@@ -132,7 +132,7 @@ const LOCAL_PERSONA: Partial<Record<AgentRole, string>> = {
   [AgentRole.Model2]: 'You are Model 2 on an LLM council, the Analyst: reason step by step through the question and its implications.',
 };
 
-// Small in-browser models ramble without a cap, and the Council runs four of these
+// Small in-browser models ramble without a cap, and the Council runs three of these
 // generations back to back on one engine.
 // Phones run a 2048-token window, so replies are capped lower there.
 const LOCAL_MAX_TOKENS: Record<AnswerMode, number> = getDeviceProfile().constrained
