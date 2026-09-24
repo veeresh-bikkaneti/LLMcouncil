@@ -19,6 +19,7 @@ export const AVAILABLE_MODELS: EngineModelOption[] = [
     sizeLabel: 'under 1 GB',
     vramLabel: '~0.9 GB VRAM',
     vramMB: 879,
+    vramF32MB: 1129,
     description: 'Phone-sized. Runs on recent Android phones and small laptops; answers are brief and simple.',
   },
   {
@@ -29,6 +30,7 @@ export const AVAILABLE_MODELS: EngineModelOption[] = [
     sizeLabel: 'under 1 GB',
     vramLabel: '~1 GB VRAM',
     vramMB: 945,
+    vramF32MB: 1060,
     description: 'The lightest option, for older phones. Good for short factual lookups only.',
   },
   {
@@ -39,7 +41,8 @@ export const AVAILABLE_MODELS: EngineModelOption[] = [
     sizeLabel: '~1.6 GB',
     vramLabel: '~2 GB VRAM',
     vramMB: 1630,
-    description: 'Best for low-power laptops and high-end phones. Limited multi-step reasoning.',
+    vramF32MB: 1889,
+    description: 'Best for low-power laptops and quick lookups. Limited multi-step reasoning.',
   },
   {
     id: 'Llama-3.2-3B-Instruct-q4f16_1-MLC',
@@ -49,6 +52,7 @@ export const AVAILABLE_MODELS: EngineModelOption[] = [
     sizeLabel: '~2.3 GB',
     vramLabel: '~3 GB VRAM',
     vramMB: 2264,
+    vramF32MB: 2952,
     description: 'Noticeably better understanding than 1.5B, still runs on integrated GPUs.',
   },
   {
@@ -59,6 +63,7 @@ export const AVAILABLE_MODELS: EngineModelOption[] = [
     sizeLabel: '~5.1 GB',
     vramLabel: '~6 GB VRAM',
     vramMB: 5107,
+    vramF32MB: 5900,
     description:
       'Strong general-purpose reasoning and long-context summarization -- the closest local match to a cloud-grade assistant.',
     recommended: true,
@@ -71,6 +76,7 @@ export const AVAILABLE_MODELS: EngineModelOption[] = [
     sizeLabel: '~3.7 GB',
     vramLabel: '~4 GB VRAM',
     vramMB: 3672,
+    vramF32MB: 5483,
     description: 'Compact but reasoning-tuned; a good middle ground on mid-range GPUs.',
   },
   {
@@ -81,6 +87,7 @@ export const AVAILABLE_MODELS: EngineModelOption[] = [
     sizeLabel: '~5.0 GB',
     vramLabel: '~7 GB VRAM',
     vramMB: 5001,
+    vramF32MB: 6101,
     description: 'Shows its work step-by-step before answering. Best for multi-step or analytical questions.',
   },
   {
@@ -91,6 +98,7 @@ export const AVAILABLE_MODELS: EngineModelOption[] = [
     sizeLabel: '~4.9 GB',
     vramLabel: '~6 GB VRAM',
     vramMB: 4876,
+    vramF32MB: 5779,
     description: 'Natively supports structured function calling -- reserved for future tool-use features.',
   },
 ];
@@ -110,7 +118,8 @@ export interface DeviceProfile {
 // nothing in the page can catch that. Phones hit it far below their total RAM, so
 // on constrained devices we refuse to load anything over this instead of crashing.
 const MOBILE_MAX_VRAM_MB = 1700;
-const LOW_MEMORY_MAX_VRAM_MB = 1000;
+// Just enough for the two phone-sized models' q4f32 builds.
+const LOW_MEMORY_MAX_VRAM_MB = 1150;
 
 let deviceProfile: DeviceProfile | null = null;
 
@@ -140,9 +149,13 @@ export function getDeviceProfile(): DeviceProfile {
   return deviceProfile;
 }
 
-/** Whether this device can load `model` without risking the tab being killed. */
+/**
+ * Whether this device can load `model` without risking the tab being killed. Judged
+ * on the larger q4f32 build: whether the GPU has shader-f16 (and so gets the smaller
+ * q4f16 build) is only known asynchronously, at load time.
+ */
 export function fitsDevice(model: EngineModelOption): boolean {
-  return model.vramMB <= getDeviceProfile().maxVramMB;
+  return Math.max(model.vramMB, model.vramF32MB) <= getDeviceProfile().maxVramMB;
 }
 
 const MOBILE_DEFAULT_ID = 'Llama-3.2-1B-Instruct-q4f16_1-MLC';
@@ -153,7 +166,7 @@ function pickForDevice(preferred: string): string {
     const model = AVAILABLE_MODELS.find((m) => m.id === id);
     if (model && fitsDevice(model)) return id;
   }
-  return [...AVAILABLE_MODELS].sort((a, b) => a.vramMB - b.vramMB)[0].id;
+  return [...AVAILABLE_MODELS].sort((a, b) => a.vramF32MB - b.vramF32MB)[0].id;
 }
 
 export const DEFAULT_MODEL_ID = pickForDevice(

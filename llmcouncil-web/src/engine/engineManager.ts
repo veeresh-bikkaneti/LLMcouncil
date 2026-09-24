@@ -5,7 +5,7 @@ import {
   type InitProgressReport,
   type MLCEngineInterface,
 } from '@mlc-ai/web-llm';
-import { AVAILABLE_MODELS, getDeviceProfile, isWebGPUSupported } from './models';
+import { AVAILABLE_MODELS, fitsDevice, getDeviceProfile, isWebGPUSupported } from './models';
 import { currentEpoch, GenerationCancelledError, setInterruptHook, type CancelScope } from './cancellation';
 
 export { GenerationCancelledError } from './cancellation';
@@ -46,8 +46,12 @@ interface GpuAdapterLike {
  * build of the same model instead of an error.
  */
 async function resolveBuild(modelId: string): Promise<{ id: string; vramMB?: number }> {
-  const gpu = (navigator as unknown as { gpu: { requestAdapter(): Promise<GpuAdapterLike | null> } }).gpu;
-  const adapter = await gpu.requestAdapter();
+  const gpu = (navigator as unknown as {
+    gpu: { requestAdapter(opts?: { powerPreference?: string }): Promise<GpuAdapterLike | null> };
+  }).gpu;
+  // The same adapter WebLLM itself will request, so the feature check is about the
+  // GPU the model actually runs on (dual-GPU laptops).
+  const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) {
     throw new Error(
       'This browser exposes WebGPU but no usable GPU adapter, so in-browser models cannot run here. ' +
@@ -60,6 +64,18 @@ async function resolveBuild(modelId: string): Promise<{ id: string; vramMB?: num
     if (prebuiltAppConfig.model_list.some((m) => m.model_id === f32)) id = f32;
   }
   return { id, vramMB: prebuiltAppConfig.model_list.find((m) => m.model_id === id)?.vram_required_MB };
+}
+
+async function discardEngine(): Promise<void> {
+  if (!engine) return;
+  const old = engine;
+  engine = null;
+  engineModelId = null;
+  try {
+    await old.unload();
+  } catch {
+    // best-effort; the reference is dropped either way
+  }
 }
 
 async function ensureEngine(modelId: string, onProgress?: ProgressFn): Promise<MLCEngineInterface> {
@@ -77,21 +93,15 @@ async function ensureEngine(modelId: string, onProgress?: ProgressFn): Promise<M
   const { maxVramMB } = getDeviceProfile();
   if (build.vramMB !== undefined && build.vramMB > maxVramMB) {
     const label = AVAILABLE_MODELS.find((m) => m.id === modelId)?.label ?? modelId;
+    const alternatives = AVAILABLE_MODELS.filter((m) => m.id !== modelId && fitsDevice(m)).map((m) => m.label);
     throw new Error(
       `${label} needs about ${(build.vramMB / 1024).toFixed(1)} GB of GPU memory, more than this device ` +
-        'can give a browser tab. Pick Llama 3.2 1B or Qwen2.5 0.5B instead.'
+        'can give a browser tab. ' +
+        (alternatives.length ? `Pick ${alternatives.join(' or ')} instead.` : 'Connect a cloud model in the Model Hub instead.')
     );
   }
 
-  if (engine) {
-    try {
-      await engine.unload();
-    } catch {
-      // best-effort; the reference is dropped either way
-    }
-    engine = null;
-    engineModelId = null;
-  }
+  await discardEngine();
 
   try {
     engine = await CreateMLCEngine(build.id, {
@@ -182,6 +192,12 @@ export function generate(
       // An interrupted stream ends early but normally; its partial text is not an answer.
       if (cancelled()) throw new GenerationCancelledError();
       return text;
+    } catch (e) {
+      // The GPU can be lost after loading (Android does this to background tabs);
+      // WebLLM then unloads the model, and reusing the cached engine would fail every
+      // request until a page reload. Drop it so the next request loads afresh.
+      if (!(e instanceof GenerationCancelledError)) await discardEngine();
+      throw e;
     } finally {
       activeScope = null;
     }
