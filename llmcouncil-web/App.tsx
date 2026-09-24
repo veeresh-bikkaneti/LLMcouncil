@@ -188,10 +188,16 @@ const App: React.FC = () => {
         onProgress: (text, fraction) => {
           if (!isStale()) setEngineProgress(fraction !== undefined && fraction >= 1 ? null : { text, fraction });
         },
-        // Only ever invoked by answerDirectly (Quick mode); Council seats don't stream.
-        onToken: (delta) => {
-          if (!isStale()) setStreamingText(prev => prev + delta);
-        },
+        // hooks is one shared object also passed to Council's analyzeWithAgent/
+        // synthesizeConsensus calls below, and runLocal forwards onToken
+        // unconditionally -- so this must be gated here, not left to variant-based
+        // rendering, or Council's local seats would stream into (and concatenate
+        // into) a string nothing shows, for no reason.
+        onToken: mode === 'quick'
+          ? (delta: string) => {
+              if (!isStale()) setStreamingText(prev => prev + delta);
+            }
+          : undefined,
       };
 
       if (mode === 'quick') {
