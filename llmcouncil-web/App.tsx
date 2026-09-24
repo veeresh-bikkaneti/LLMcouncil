@@ -1,6 +1,6 @@
-import React, { useState, useCallback, useRef, useEffect, Suspense, lazy } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { AgentRole, type AgentAnalysis, type ConsensusReport, type ModelQuota, type AnswerMode } from './types';
-import { analyzeWithAgent, cancelLocalGenerations, synthesizeConsensus, sanitizeText, type LocalRunHooks } from './services/inferenceService';
+import { analyzeWithAgent, answerDirectly, cancelLocalGenerations, synthesizeConsensus, sanitizeText, type LocalRunHooks } from './services/inferenceService';
 import InputPanel, { INITIAL_MODELS, isSelectableModel } from './components/TicketInputForm';
 import CouncilView from './components/CouncilView';
 import ConsensusDashboard from './components/ConsensusDashboard';
@@ -12,17 +12,15 @@ import { sanitizePII } from './src/engine/sanitize';
 import type { SearchResult } from './src/engine/types';
 import { currentEpoch } from './src/engine/cancellation';
 
-// Lazy-loaded so the @mlc-ai/web-llm engine (and its WASM/model download machinery)
-// is only pulled into the bundle when the user actually switches to Local Assistant mode.
-const GroundedAssistant = lazy(() => import('./components/GroundedAssistant'));
-
 // v4: earlier builds saved Gemini defaults here, which a keyless deployment can't run.
 // v5: earlier builds put one model in every seat; the defaults now mix three families.
 // v6: the Council dropped from 4 models (3 members + a chair reusing one of them) to
 // 3: two members deliberate, a third, dedicated model gives the Final Arbitration.
 const STORAGE_KEY = 'llm_council_selections_v6';
-const MODE_STORAGE_KEY = 'llm_council_mode_v1';
-// Shared with the Local Assistant, so one optional Tavily/Brave key serves both modes.
+// v2: Universal Council and Local Assistant merged into one screen with a Quick/
+// Council toggle; the mode values changed from 'council'/'local' to 'council'/'quick'.
+const MODE_STORAGE_KEY = 'llm_council_mode_v2';
+// Shared by both modes, so one optional Tavily/Brave key serves either.
 const SEARCH_KEY_STORAGE = 'llm_council_local_search_key_v1';
 const PRIVACY_FILTER_ID = 'on-device-pii-filter';
 
@@ -52,9 +50,9 @@ const loadSelections = (registry: ModelQuota[]): Record<AgentRole, string> => {
   return defaults;
 };
 
-const retrieveSources = async (query: string): Promise<SearchResult[]> => {
+const retrieveSources = async (query: string, apiKey: string): Promise<SearchResult[]> => {
   const results = await executeWebSearch(query, {
-    apiKey: localStorage.getItem(SEARCH_KEY_STORAGE)?.trim() || undefined,
+    apiKey: apiKey.trim() || undefined,
     maxResults: 5,
   });
   return results.map(r => ({ ...r, title: sanitizePII(r.title), content: sanitizePII(r.content) }));
@@ -66,11 +64,16 @@ interface EngineProgress {
 }
 
 const App: React.FC = () => {
-  // Default to Local Assistant: the whole point of that mode is that it works with
-  // zero cloud API key, so that's what a first-time visitor should land on.
+  // Checked once: a browser's WebGPU support doesn't change during a session. Shown
+  // proactively (not just as a submit-time error) since Quick -- the zero-cloud-key
+  // default a first-time visitor lands on -- otherwise gives no hint until they've
+  // already typed a question and hit submit.
+  const [webgpuOk] = useState<boolean>(() => isWebGPUSupported());
+  // Default to Quick: the whole point of that mode is a single answer with zero
+  // cloud API key, so that's what a first-time visitor should land on.
   const [mode, setMode] = useState<AppMode>(() => {
     const saved = localStorage.getItem(MODE_STORAGE_KEY);
-    return saved === 'council' || saved === 'local' ? saved : 'local';
+    return saved === 'council' || saved === 'quick' ? saved : 'quick';
   });
   const [query, setQuery] = useState<string>('');
   const [useAutomation, setUseAutomation] = useState<boolean>(true);
@@ -82,16 +85,26 @@ const App: React.FC = () => {
   const [answerMode, setAnswerMode] = useState<AnswerMode>('complex');
   const [sources, setSources] = useState<SearchResult[]>([]);
   const [engineProgress, setEngineProgress] = useState<EngineProgress | null>(null);
+  // Quick mode's in-browser answer streams token-by-token, same as the old Local
+  // Assistant did; Council seats never streamed to the UI, so this stays empty there.
+  const [streamingText, setStreamingText] = useState('');
   // Each run takes a new id; a run whose id is no longer current (aborted, or
   // superseded by a newer run) must not touch state, so its late results can never
   // overwrite a newer run's.
   const runIdRef = useRef(0);
 
   const [selectedModelIds, setSelectedModelIds] = useState<Record<AgentRole, string>>(() => loadSelections(INITIAL_MODELS));
+  // Optional Tavily/Brave key for real web search; grounding falls back to the free,
+  // keyless Wikipedia/DuckDuckGo sources without one.
+  const [searchApiKey, setSearchApiKey] = useState<string>(() => localStorage.getItem(SEARCH_KEY_STORAGE) || '');
 
   useEffect(() => {
     localStorage.setItem(MODE_STORAGE_KEY, mode);
   }, [mode]);
+
+  useEffect(() => {
+    localStorage.setItem(SEARCH_KEY_STORAGE, searchApiKey);
+  }, [searchApiKey]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(selectedModelIds));
@@ -132,6 +145,7 @@ const App: React.FC = () => {
     setConsensus(null);
     setSources([]);
     setEngineProgress(null);
+    setStreamingText('');
     setAgentAnalyses(prev => prev.map(a => ({ ...a, status: 'idle', analysis: '', usage: undefined })));
     const runId = ++runIdRef.current;
     const isStale = () => runIdRef.current !== runId;
@@ -145,7 +159,7 @@ const App: React.FC = () => {
       updateAgent(AgentRole.Privacy, { status: 'done', analysis: 'PII scrubbed on-device before anything left the browser.' });
 
       const modelFor = (role: AgentRole) => registry.find(m => m.id === selectedModelIds[role] && isSelectableModel(m));
-      const seats = [...COUNCIL_ROLES, AgentRole.Chairperson];
+      const seats = mode === 'quick' ? [AgentRole.Model1] : [...COUNCIL_ROLES, AgentRole.Chairperson];
       const missing = seats.filter(role => !modelFor(role));
       if (missing.length) {
         throw new Error(`No usable model is selected for: ${missing.join(', ')}. Pick one for every seat.`);
@@ -158,11 +172,13 @@ const App: React.FC = () => {
         );
       }
 
-      // Retrieval runs once per question and is shared by every in-browser seat, which
-      // is held to citing it. Cloud seats keep answering from their own knowledge.
+      // In Council mode, retrieval only runs when a seat needs it (cloud seats answer
+      // from their own knowledge). Quick mode always grounds -- a single ungrounded
+      // answer with no other perspective to catch a mistake is the case most worth
+      // citing, so unlike a Council cloud seat, a Quick cloud model is grounded too.
       let grounding: SearchResult[] = [];
-      if (usesLocal) {
-        grounding = await retrieveSources(cleanQuery);
+      if (mode === 'quick' || usesLocal) {
+        grounding = await retrieveSources(cleanQuery, searchApiKey);
         if (isStale()) return;
         setSources(grounding);
       }
@@ -172,7 +188,38 @@ const App: React.FC = () => {
         onProgress: (text, fraction) => {
           if (!isStale()) setEngineProgress(fraction !== undefined && fraction >= 1 ? null : { text, fraction });
         },
+        // hooks is one shared object also passed to Council's analyzeWithAgent/
+        // synthesizeConsensus calls below, and runLocal forwards onToken
+        // unconditionally -- so this must be gated here, not left to variant-based
+        // rendering, or Council's local seats would stream into (and concatenate
+        // into) a string nothing shows, for no reason.
+        onToken: mode === 'quick'
+          ? (delta: string) => {
+              if (!isStale()) setStreamingText(prev => prev + delta);
+            }
+          : undefined,
       };
+
+      if (mode === 'quick') {
+        const model = modelFor(AgentRole.Model1)!;
+        updateAgent(AgentRole.Model1, { status: 'thinking', modelName: model.id, providerType: model.providerType });
+        try {
+          const { report, usage, resolvedModelId } = await answerDirectly(cleanQuery, model, answerMode, hooks);
+          if (isStale()) return;
+          setConsensus(report);
+          const finalModelId = resolvedModelId ?? model.id;
+          updateAgent(AgentRole.Model1, { status: 'done', usage, modelName: finalModelId, prompt: cleanQuery });
+          if (resolvedModelId && resolvedModelId !== model.id) {
+            setSelectedModelIds(prev => ({ ...prev, [AgentRole.Model1]: resolvedModelId }));
+          }
+        } catch (e) {
+          if (isStale()) return;
+          const message = (e as Error).message;
+          updateAgent(AgentRole.Model1, { status: 'error', analysis: message, prompt: cleanQuery });
+          setError(message);
+        }
+        return;
+      }
 
       // One shared engine backs every seat, so they can never truly run at once --
       // engineManager's queue already serializes them. Awaiting one seat before
@@ -244,7 +291,7 @@ const App: React.FC = () => {
         setIsLoading(false);
       }
     }
-  }, [query, selectedModelIds, registry, answerMode, isLoading]);
+  }, [mode, query, selectedModelIds, registry, answerMode, isLoading, searchApiKey]);
 
   const handleAbort = () => {
     runIdRef.current++;
@@ -282,7 +329,7 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-6 flex-wrap justify-center">
-             <ModeSwitcher mode={mode} onChange={setMode} />
+             <ModeSwitcher mode={mode} onChange={setMode} disabled={isLoading} />
              <div className="hidden lg:flex items-center gap-3 bg-slate-900/60 px-6 py-2.5 rounded-2xl border border-slate-800 shadow-xl backdrop-blur-md">
                 <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Gateway Ready</span>
@@ -290,83 +337,95 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        {mode === 'council' ? (
-          <main className="grid grid-cols-1 lg:grid-cols-5 gap-12 lg:gap-16">
-            <div className="lg:col-span-2 min-w-0">
-              <InputPanel
-                query={query} setQuery={setQuery}
-                handleSubmit={handleSubmit} handleCancel={() => {}}
-                isLoading={isLoading} useAutomation={useAutomation} setUseAutomation={setUseAutomation}
-                selectedModels={selectedModelIds}
-                onModelChange={handleModelChange}
-                requestCounts={requestCounts}
-                onShowCancel={() => setShowCancelConfirm(true)}
-                answerMode={answerMode}
-                setAnswerMode={setAnswerMode}
-                registry={registry}
-                setRegistry={setRegistry}
-              />
-            </div>
-            <div className="lg:col-span-3 space-y-20 min-w-0">
-              {error && (
-                <div className="bg-rose-500/5 border border-rose-500/20 rounded-[2rem] p-8 flex items-start gap-4">
-                  <div className="w-2 h-2 mt-1.5 rounded-full bg-rose-500 flex-shrink-0" />
-                  <div>
-                    <p className="text-[11px] font-black uppercase tracking-widest text-rose-400 mb-1.5">Signal Failed</p>
-                    <p className="text-sm text-rose-200/70 leading-relaxed">{error}</p>
+        {(() => {
+          // Quick mode has one seat, so it's the "primary" answer to show in the final
+          // answer card; Council mode's is the Chairperson's, arbitrating over the rest.
+          const primaryRole = mode === 'quick' ? AgentRole.Model1 : AgentRole.Chairperson;
+          const primary = agentAnalyses.find(a => a.role === primaryRole);
+          // Reflects the model that actually ran once resolved (see the step-down
+          // ladder), falling back to the selected one beforehand.
+          const primaryModelId = primary?.modelName ?? selectedModelIds[primaryRole];
+          const primaryModelLabel = registry.find(m => m.id === primaryModelId)?.label ?? primaryModelId;
+          return (
+            <main className="grid grid-cols-1 lg:grid-cols-5 gap-12 lg:gap-16">
+              <div className="lg:col-span-2 min-w-0">
+                <InputPanel
+                  mode={mode}
+                  query={query} setQuery={setQuery}
+                  handleSubmit={handleSubmit} handleCancel={() => {}}
+                  isLoading={isLoading} useAutomation={useAutomation} setUseAutomation={setUseAutomation}
+                  selectedModels={selectedModelIds}
+                  onModelChange={handleModelChange}
+                  requestCounts={requestCounts}
+                  onShowCancel={() => setShowCancelConfirm(true)}
+                  answerMode={answerMode}
+                  setAnswerMode={setAnswerMode}
+                  registry={registry}
+                  setRegistry={setRegistry}
+                  searchApiKey={searchApiKey}
+                  setSearchApiKey={setSearchApiKey}
+                />
+              </div>
+              <div className="lg:col-span-3 space-y-20 min-w-0">
+                {!webgpuOk && (
+                  <div className="bg-amber-500/5 border border-amber-500/20 rounded-[2rem] p-8 flex items-start gap-4">
+                    <div className="w-2 h-2 mt-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                    <div>
+                      <p className="text-[11px] font-black uppercase tracking-widest text-amber-400 mb-1.5">WebGPU Unavailable</p>
+                      <p className="text-sm text-amber-200/70 leading-relaxed">
+                        This browser can't run in-browser models. Use a recent desktop Chrome or Edge, or connect a
+                        cloud model with your own API key in the Model Hub.
+                      </p>
+                    </div>
                   </div>
-                </div>
-              )}
-              {engineProgress && (
-                <div className="bg-slate-900/60 border border-slate-800 rounded-[2rem] p-8 space-y-3">
-                  <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400">
-                    <span>Loading in-browser model — downloaded once, then cached</span>
-                    {engineProgress.fraction !== undefined && <span>{Math.round(engineProgress.fraction * 100)}%</span>}
+                )}
+                {error && (
+                  <div className="bg-rose-500/5 border border-rose-500/20 rounded-[2rem] p-8 flex items-start gap-4">
+                    <div className="w-2 h-2 mt-1.5 rounded-full bg-rose-500 flex-shrink-0" />
+                    <div>
+                      <p className="text-[11px] font-black uppercase tracking-widest text-rose-400 mb-1.5">Signal Failed</p>
+                      <p className="text-sm text-rose-200/70 leading-relaxed">{error}</p>
+                    </div>
                   </div>
-                  <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-emerald-500 to-violet-500 transition-all duration-300"
-                      style={{ width: `${Math.max(2, (engineProgress.fraction ?? 0) * 100)}%` }}
-                    />
+                )}
+                {engineProgress && (
+                  <div className="bg-slate-900/60 border border-slate-800 rounded-[2rem] p-8 space-y-3">
+                    <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400">
+                      <span>Loading in-browser model — downloaded once, then cached</span>
+                      {engineProgress.fraction !== undefined && <span>{Math.round(engineProgress.fraction * 100)}%</span>}
+                    </div>
+                    <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-emerald-500 to-violet-500 transition-all duration-300"
+                        style={{ width: `${Math.max(2, (engineProgress.fraction ?? 0) * 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-600 font-mono truncate">{engineProgress.text}</p>
                   </div>
-                  <p className="text-[10px] text-slate-600 font-mono truncate">{engineProgress.text}</p>
-                </div>
-              )}
-              <CouncilView
-                agentAnalyses={agentAnalyses.filter(a => a.role !== AgentRole.Chairperson)}
-                onAnalysisChange={(role, text) => updateAgent(role, { analysis: text })}
-                useAutomation={useAutomation}
-                requestCounts={requestCounts}
-              />
-              <ConsensusDashboard
-                consensus={consensus}
-                chairpersonStatus={agentAnalyses.find(a => a.role === AgentRole.Chairperson)?.status || 'idle'}
-                chairpersonUsage={agentAnalyses.find(a => a.role === AgentRole.Chairperson)?.usage}
-                originalQuery={query}
-                agentAnalyses={agentAnalyses}
-                chairModelLabel={(() => {
-                  // Reflects the model that actually ran once resolved (see the
-                  // step-down ladder), falling back to the selected one beforehand.
-                  const chairId = agentAnalyses.find(a => a.role === AgentRole.Chairperson)?.modelName ?? selectedModelIds[AgentRole.Chairperson];
-                  return registry.find(m => m.id === chairId)?.label ?? chairId;
-                })()}
-                sources={sources}
-              />
-            </div>
-          </main>
-        ) : (
-          <main className="max-w-3xl mx-auto">
-            <Suspense
-              fallback={
-                <div className="text-center text-[11px] text-slate-500 uppercase tracking-widest font-black py-24">
-                  Loading Local Assistant…
-                </div>
-              }
-            >
-              <GroundedAssistant />
-            </Suspense>
-          </main>
-        )}
+                )}
+                {mode === 'council' && (
+                  <CouncilView
+                    agentAnalyses={agentAnalyses.filter(a => a.role !== AgentRole.Chairperson)}
+                    onAnalysisChange={(role, text) => updateAgent(role, { analysis: text })}
+                    useAutomation={useAutomation}
+                    requestCounts={requestCounts}
+                  />
+                )}
+                <ConsensusDashboard
+                  variant={mode}
+                  consensus={consensus}
+                  chairpersonStatus={primary?.status || 'idle'}
+                  chairpersonUsage={primary?.usage}
+                  originalQuery={query}
+                  agentAnalyses={agentAnalyses}
+                  chairModelLabel={primaryModelLabel}
+                  sources={sources}
+                  streamingText={streamingText}
+                />
+              </div>
+            </main>
+          );
+        })()}
       </div>
     </div>
   );

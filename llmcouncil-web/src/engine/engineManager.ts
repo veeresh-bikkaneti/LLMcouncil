@@ -12,8 +12,8 @@ export { GenerationCancelledError } from './cancellation';
 
 export type ProgressFn = (text: string, fraction?: number) => void;
 
-// One engine for the whole app. Each model is a multi-GB WebGPU allocation, so the
-// Council's seats and the Local Assistant share a single loaded model; asking for a
+// One engine for the whole app. Each model is a multi-GB WebGPU allocation, so
+// Quick mode and every Council seat share a single loaded model; asking for a
 // different one unloads the current one first, so two never coexist.
 let engine: MLCEngineInterface | null = null;
 let engineModelId: string | null = null;
