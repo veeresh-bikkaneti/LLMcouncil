@@ -171,6 +171,17 @@ export function getDeviceProfile(): DeviceProfile {
   return deviceProfile;
 }
 
+// Phones get half the context window: the KV cache is smaller, and every prompt is
+// shorter, so each GPU pass finishes well inside Android's GPU watchdog. Long passes
+// on a phone can get the GPU reset mid-answer ("Buffer was unmapped...").
+const PHONE_CONTEXT_TOKENS = 2048;
+const DEFAULT_CONTEXT_TOKENS = 4096; // every shipped model's compiled window
+
+/** Context window (prompt plus reply) the engine is loaded with on this device. */
+export function localContextTokens(): number {
+  return getDeviceProfile().constrained ? PHONE_CONTEXT_TOKENS : DEFAULT_CONTEXT_TOKENS;
+}
+
 /**
  * Whether this device can load `model` without risking the tab being killed. Judged
  * on the larger q4f32 build: whether the GPU has shader-f16 (and so gets the smaller

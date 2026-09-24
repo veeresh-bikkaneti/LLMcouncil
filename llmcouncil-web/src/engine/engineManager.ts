@@ -5,7 +5,7 @@ import {
   type InitProgressReport,
   type MLCEngineInterface,
 } from '@mlc-ai/web-llm';
-import { AVAILABLE_MODELS, fitsDevice, getDeviceProfile, isWebGPUSupported } from './models';
+import { AVAILABLE_MODELS, fitsDevice, getDeviceProfile, isWebGPUSupported, localContextTokens } from './models';
 import { currentEpoch, GenerationCancelledError, setInterruptHook, type CancelScope } from './cancellation';
 
 export { GenerationCancelledError } from './cancellation';
@@ -35,6 +35,20 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
   queue = run.catch(() => undefined);
   return run;
 }
+
+// What a GPU reset looks like from here: WebLLM disposes everything when the device
+// is lost, so an in-flight readback fails with "Buffer was unmapped before mapping
+// was resolved", or later calls fail on the disposed instance.
+const GPU_LOSS_RE = /mapAsync|unmapped before mapping|device (?:was |is )?lost|DeviceLostError|Instance\.dispose|destroyed/i;
+
+function isGpuLoss(e: unknown): boolean {
+  const err = e as Error;
+  return err?.name === 'DeviceLostError' || GPU_LOSS_RE.test(err?.message || String(e));
+}
+
+const GPU_LOST_MESSAGE =
+  "The GPU dropped the model mid-answer and a retry didn't help. On phones this usually means memory " +
+  'pressure or a GPU timeout: close other tabs and apps, try Simple mode, or use the same model in more seats.';
 
 interface GpuAdapterLike {
   features: { has(feature: string): boolean };
@@ -104,12 +118,15 @@ async function ensureEngine(modelId: string, onProgress?: ProgressFn): Promise<M
   await discardEngine();
 
   try {
-    engine = await CreateMLCEngine(build.id, {
-      initProgressCallback: (report: InitProgressReport) => onProgress?.(report.text, report.progress),
-    });
+    engine = await CreateMLCEngine(
+      build.id,
+      { initProgressCallback: (report: InitProgressReport) => onProgress?.(report.text, report.progress) },
+      // Only ever shrinks the window (on phones); the prompt budgets follow the same value.
+      { context_window_size: localContextTokens() }
+    );
   } catch (e) {
     const detail = (e as Error).message || String(e);
-    if ((e as Error).name === 'DeviceLostError' || /device was lost|out of memory/i.test(detail)) {
+    if (isGpuLoss(e) || /out of memory/i.test(detail)) {
       throw new Error(
         'The GPU ran out of memory loading this model. Pick a smaller model (Llama 3.2 1B or ' +
           'Qwen2.5 0.5B on phones), close other tabs, and try again.'
@@ -155,51 +172,63 @@ export function generate(
   const epoch = opts.epoch ?? currentEpoch(scope);
   const cancelled = () => currentEpoch(scope) !== epoch;
   return enqueue(async () => {
-    if (cancelled()) throw new GenerationCancelledError();
-    const active = await ensureEngine(modelId, opts.onProgress);
-    // A model download can take minutes; the run may have been aborted meanwhile.
-    if (cancelled()) throw new GenerationCancelledError();
-
-    activeScope = scope;
-    try {
-      const stream = await active.chat.completions.create({
-        messages,
-        temperature: opts.temperature ?? 0,
-        ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
-        stream: true,
-      });
-
-      let text = '';
-      let interrupted = false;
-      for await (const chunk of stream) {
-        // Checked per chunk as well: an interrupt that lands before the stream's
-        // first step is reset by WebLLM, so it can't be relied on alone. Never break
-        // out of the loop, though: WebLLM releases its engine lock only when the
-        // stream runs to completion, so abandoning it would deadlock the engine.
-        if (cancelled()) {
-          if (!interrupted) {
-            interrupted = true;
-            active.interruptGenerate();
-          }
-          continue;
-        }
-        const delta = chunk.choices[0]?.delta?.content || '';
-        if (delta) {
-          text += delta;
-          opts.onToken?.(delta);
-        }
-      }
-      // An interrupted stream ends early but normally; its partial text is not an answer.
+    // One retry after a GPU reset: the model is reloaded (from the browser cache) and
+    // the whole request runs again. Not when tokens were already streamed to the UI,
+    // which would show the start of the answer twice.
+    for (let attempt = 0; ; attempt++) {
       if (cancelled()) throw new GenerationCancelledError();
-      return text;
-    } catch (e) {
-      // The GPU can be lost after loading (Android does this to background tabs);
-      // WebLLM then unloads the model, and reusing the cached engine would fail every
-      // request until a page reload. Drop it so the next request loads afresh.
-      if (!(e instanceof GenerationCancelledError)) await discardEngine();
-      throw e;
-    } finally {
-      activeScope = null;
+      const active = await ensureEngine(modelId, opts.onProgress);
+      // A model download can take minutes; the run may have been aborted meanwhile.
+      if (cancelled()) throw new GenerationCancelledError();
+
+      let streamed = false;
+      activeScope = scope;
+      try {
+        const stream = await active.chat.completions.create({
+          messages,
+          temperature: opts.temperature ?? 0,
+          ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
+          stream: true,
+        });
+
+        let text = '';
+        let interrupted = false;
+        for await (const chunk of stream) {
+          // Checked per chunk as well: an interrupt that lands before the stream's
+          // first step is reset by WebLLM, so it can't be relied on alone. Never break
+          // out of the loop, though: WebLLM releases its engine lock only when the
+          // stream runs to completion, so abandoning it would deadlock the engine.
+          if (cancelled()) {
+            if (!interrupted) {
+              interrupted = true;
+              active.interruptGenerate();
+            }
+            continue;
+          }
+          const delta = chunk.choices[0]?.delta?.content || '';
+          if (delta) {
+            text += delta;
+            if (opts.onToken) {
+              streamed = true;
+              opts.onToken(delta);
+            }
+          }
+        }
+        // An interrupted stream ends early but normally; its partial text is not an answer.
+        if (cancelled()) throw new GenerationCancelledError();
+        return text;
+      } catch (e) {
+        if (e instanceof GenerationCancelledError) throw e;
+        // The GPU can be lost after loading (Android does this to background tabs, and
+        // under memory pressure); WebLLM then disposes the model, and reusing the cached
+        // engine would fail every request until a page reload. Drop it either way.
+        await discardEngine();
+        if (!isGpuLoss(e)) throw e;
+        if (attempt === 0 && !streamed) continue;
+        throw new Error(GPU_LOST_MESSAGE);
+      } finally {
+        activeScope = null;
+      }
     }
   });
 }

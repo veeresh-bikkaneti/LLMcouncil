@@ -1,3 +1,4 @@
+import { localContextTokens } from './models';
 import { sanitizePII } from './sanitize';
 import type { ConfidenceLevel, SearchResult } from './types';
 
@@ -10,10 +11,9 @@ const CONFIDENCE_TAG_RE = /[\s*_]*Confidence Level[\s*_]*:[\s*_]*\[?\s*(High|Med
 // ahead of their real answer; it must never reach the rendered answer.
 const THINK_BLOCK_RE = /<think>[\s\S]*?<\/think>/gi;
 
-// Every WebLLM model this app ships has a 4096-token context window (per
-// prebuiltAppConfig). Prompt plus reply must fit in it, or WebLLM throws
+// Prompt plus reply must fit the context window the engine was loaded with (4096
+// tokens, or 2048 on phones; see localContextTokens), or WebLLM throws
 // ContextWindowSizeExceededError instead of answering.
-const LOCAL_CONTEXT_TOKENS = 4096;
 // Deliberately pessimistic for English (~4 chars/token is typical), so the estimate
 // errs toward cutting a little too much rather than overflowing.
 const CHARS_PER_TOKEN = 3.5;
@@ -39,7 +39,7 @@ export function promptCost(text: string): number {
 
 /** Budget units (see promptCost) of variable prompt content that fit alongside a reply of `maxTokens`. */
 export function localInputBudgetChars(maxTokens: number): number {
-  return Math.floor((LOCAL_CONTEXT_TOKENS - maxTokens - PROMPT_OVERHEAD_TOKENS) * CHARS_PER_TOKEN);
+  return Math.floor((localContextTokens() - maxTokens - PROMPT_OVERHEAD_TOKENS) * CHARS_PER_TOKEN);
 }
 
 /** Cuts `text` so its promptCost fits `maxCost`, marking the cut with an ellipsis. */
