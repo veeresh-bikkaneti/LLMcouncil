@@ -38,17 +38,20 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
 
 // What a GPU reset looks like from here: WebLLM disposes everything when the device
 // is lost, so an in-flight readback fails with "Buffer was unmapped before mapping
-// was resolved", or later calls fail on the disposed instance.
-const GPU_LOSS_RE = /mapAsync|unmapped before mapping|device (?:was |is )?lost|DeviceLostError|Instance\.dispose|destroyed/i;
+// was resolved", later calls fail on disposed tensors, and a loss while idle leaves
+// the engine unloaded (ModelNotLoadedError on the next request).
+const GPU_LOSS_RE =
+  /mapAsync|unmapped before mapping|device (?:was |is )?lost|DeviceLostError|Instance\.dispose|destroyed|already been disposed|ModelNotLoaded|Model not loaded/i;
 
 function isGpuLoss(e: unknown): boolean {
   const err = e as Error;
   return err?.name === 'DeviceLostError' || GPU_LOSS_RE.test(err?.message || String(e));
 }
 
-const GPU_LOST_MESSAGE =
-  "The GPU dropped the model mid-answer and a retry didn't help. On phones this usually means memory " +
-  'pressure or a GPU timeout: close other tabs and apps, try Simple mode, or use the same model in more seats.';
+const gpuLostMessage = (retried: boolean) =>
+  `The GPU dropped the model mid-answer${retried ? " and a retry didn't help" : ''}. On phones this usually ` +
+  'means memory pressure or a GPU timeout: close other tabs and apps, try Simple mode, or use the same model ' +
+  'in more seats.';
 
 interface GpuAdapterLike {
   features: { has(feature: string): boolean };
@@ -225,7 +228,7 @@ export function generate(
         await discardEngine();
         if (!isGpuLoss(e)) throw e;
         if (attempt === 0 && !streamed) continue;
-        throw new Error(GPU_LOST_MESSAGE);
+        throw new Error(gpuLostMessage(attempt > 0));
       } finally {
         activeScope = null;
       }

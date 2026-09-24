@@ -171,9 +171,10 @@ export function getDeviceProfile(): DeviceProfile {
   return deviceProfile;
 }
 
-// Phones get half the context window: the KV cache is smaller, and every prompt is
-// shorter, so each GPU pass finishes well inside Android's GPU watchdog. Long passes
-// on a phone can get the GPU reset mid-answer ("Buffer was unmapped...").
+// Phones get half the context window: a smaller KV cache and shorter prompts mean
+// less GPU memory and less prefill work per answer, both of which can get a phone's
+// GPU reset mid-answer ("Buffer was unmapped..."). The largest single GPU pass is
+// set by the model's compiled prefill chunk size and doesn't change.
 const PHONE_CONTEXT_TOKENS = 2048;
 const DEFAULT_CONTEXT_TOKENS = 4096; // every shipped model's compiled window
 

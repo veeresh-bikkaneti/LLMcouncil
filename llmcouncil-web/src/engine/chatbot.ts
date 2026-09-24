@@ -59,7 +59,7 @@ export class WebLLMChatbot {
 
     const safeQuery = sanitizePII(userQuery.trim());
     const sources = await this.executeWebSearch(safeQuery);
-    // Prompt plus reply must fit the model's 4096-token context window.
+    // Prompt plus reply must fit the loaded context window (4096 tokens, 2048 on phones).
     const budget = localInputBudgetChars(MAX_REPLY_TOKENS);
     const promptQuery = truncate(safeQuery, Math.floor(budget * 0.25));
     const systemPrompt = [
