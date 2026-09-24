@@ -6,7 +6,7 @@ import CouncilView from './components/CouncilView';
 import ConsensusDashboard from './components/ConsensusDashboard';
 import ModeSwitcher, { type AppMode } from './components/ModeSwitcher';
 import { LogoIcon } from './components/icons';
-import { DEFAULT_COUNCIL_MODEL_ID, isWebGPUSupported } from './src/engine/models';
+import { DEFAULT_COUNCIL_SEATS, isWebGPUSupported } from './src/engine/models';
 import { executeWebSearch } from './src/engine/search';
 import { sanitizePII } from './src/engine/sanitize';
 import type { SearchResult } from './src/engine/types';
@@ -16,7 +16,8 @@ import type { SearchResult } from './src/engine/types';
 const GroundedAssistant = lazy(() => import('./components/GroundedAssistant'));
 
 // v4: earlier builds saved Gemini defaults here, which a keyless deployment can't run.
-const STORAGE_KEY = 'llm_council_selections_v4';
+// v5: earlier builds put one model in every seat; the defaults now mix three families.
+const STORAGE_KEY = 'llm_council_selections_v5';
 const MODE_STORAGE_KEY = 'llm_council_mode_v1';
 // Shared with the Local Assistant, so one optional Tavily/Brave key serves both modes.
 const SEARCH_KEY_STORAGE = 'llm_council_local_search_key_v1';
@@ -26,10 +27,10 @@ const COUNCIL_ROLES = [AgentRole.Model1, AgentRole.Model2, AgentRole.Model3];
 
 const defaultSelections = (): Record<AgentRole, string> => ({
   [AgentRole.Privacy]: PRIVACY_FILTER_ID,
-  [AgentRole.Model1]: DEFAULT_COUNCIL_MODEL_ID,
-  [AgentRole.Model2]: DEFAULT_COUNCIL_MODEL_ID,
-  [AgentRole.Model3]: DEFAULT_COUNCIL_MODEL_ID,
-  [AgentRole.Chairperson]: DEFAULT_COUNCIL_MODEL_ID,
+  [AgentRole.Model1]: DEFAULT_COUNCIL_SEATS.members[0],
+  [AgentRole.Model2]: DEFAULT_COUNCIL_SEATS.members[1],
+  [AgentRole.Model3]: DEFAULT_COUNCIL_SEATS.members[2],
+  [AgentRole.Chairperson]: DEFAULT_COUNCIL_SEATS.chair,
 });
 
 /** Keeps saved seat choices only while they still point at a selectable model. */
@@ -225,7 +226,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 p-6 sm:p-12 flex justify-center selection:bg-violet-500/30">
+    <div className="min-h-screen bg-slate-950 px-4 py-6 sm:p-12 flex justify-center overflow-x-clip selection:bg-violet-500/30">
       {showCancelConfirm && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 backdrop-blur-md bg-slate-950/70 animate-fade-in">
           <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-10 max-w-md w-full shadow-2xl">
@@ -239,8 +240,8 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <div className="w-full max-w-7xl">
-        <header className="flex flex-col sm:flex-row justify-between items-center mb-16 gap-8">
+      <div className="w-full max-w-7xl min-w-0">
+        <header className="flex flex-col lg:flex-row justify-between items-center mb-12 sm:mb-16 gap-8">
           <div className="flex items-center gap-6">
             <div className="bg-gradient-to-br from-violet-600 to-indigo-700 p-4 rounded-[2rem] border border-white/10 shadow-[0_0_30px_rgba(139,92,246,0.2)]">
                <LogoIcon className="w-10 h-10 text-white" />
@@ -250,9 +251,9 @@ const App: React.FC = () => {
               <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.6em] ml-1">Universal Wrapper Intelligence</p>
             </div>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-6 flex-wrap justify-center">
              <ModeSwitcher mode={mode} onChange={setMode} />
-             <div className="hidden sm:flex items-center gap-3 bg-slate-900/60 px-6 py-2.5 rounded-2xl border border-slate-800 shadow-xl backdrop-blur-md">
+             <div className="hidden lg:flex items-center gap-3 bg-slate-900/60 px-6 py-2.5 rounded-2xl border border-slate-800 shadow-xl backdrop-blur-md">
                 <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Gateway Ready</span>
              </div>
@@ -260,8 +261,8 @@ const App: React.FC = () => {
         </header>
 
         {mode === 'council' ? (
-          <main className="grid grid-cols-1 lg:grid-cols-5 gap-16">
-            <div className="lg:col-span-2">
+          <main className="grid grid-cols-1 lg:grid-cols-5 gap-12 lg:gap-16">
+            <div className="lg:col-span-2 min-w-0">
               <InputPanel
                 query={query} setQuery={setQuery}
                 handleSubmit={handleSubmit} handleCancel={() => {}}
@@ -276,7 +277,7 @@ const App: React.FC = () => {
                 setRegistry={setRegistry}
               />
             </div>
-            <div className="lg:col-span-3 space-y-20">
+            <div className="lg:col-span-3 space-y-20 min-w-0">
               {error && (
                 <div className="bg-rose-500/5 border border-rose-500/20 rounded-[2rem] p-8 flex items-start gap-4">
                   <div className="w-2 h-2 mt-1.5 rounded-full bg-rose-500 flex-shrink-0" />
