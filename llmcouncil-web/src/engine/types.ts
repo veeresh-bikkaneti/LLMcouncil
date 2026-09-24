@@ -41,6 +41,10 @@ export interface EngineModelOption {
   sizeLabel: string;
   /** Approximate WebGPU VRAM needed to run this model at a usable speed. */
   vramLabel: string;
+  /** GPU memory the q4f16 build needs, in MB (prebuiltAppConfig's vram_required_MB). */
+  vramMB: number;
+  /** The same for the q4f32 build, loaded instead on GPUs without shader-f16. */
+  vramF32MB: number;
   description: string;
   recommended?: boolean;
 }
