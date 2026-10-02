@@ -167,6 +167,44 @@ const localBudget = (query: string, mode: AnswerMode) => {
   return { query: trimmedQuery, remaining: total - promptCost(trimmedQuery) };
 };
 
+/**
+ * Local WebLLM deliberately does not spend a third generation on a chair.
+ * The browser has one shared engine, so a second model would force a costly
+ * unload/load cycle and a third generation would make every Council run feel
+ * like a model download. Keep the member perspectives visible and merge exact
+ * duplicate paragraphs deterministically. A cloud chair remains available for
+ * users who explicitly select a cloud provider.
+ */
+const mergeLocalConsensus = (analyses: AgentAnalysis[]): ConsensusReport => {
+  const uniqueParagraphs: string[] = [];
+  const seen = new Set<string>();
+
+  for (const analysis of analyses) {
+    const paragraphs = analysis.analysis
+      .split(/\n{2,}/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    for (const paragraph of paragraphs) {
+      const key = paragraph.toLowerCase().replace(/\s+/g, ' ');
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueParagraphs.push(paragraph);
+      }
+    }
+  }
+
+  if (!uniqueParagraphs.length) {
+    throw new Error('Local Council returned no usable perspectives.');
+  }
+
+  return {
+    comprehensiveAnswer:
+      `Local Council consensus from ${analyses.length} perspective${analyses.length === 1 ? '' : 's'}:\n\n` +
+      uniqueParagraphs.join('\n\n'),
+    confidence: analyses.length > 1 ? 'Medium' : 'Low',
+  };
+};
+
 const runLocal = async (
   model: ModelQuota,
   systemPrompt: string,
@@ -331,33 +369,7 @@ export const synthesizeConsensus = async (
   const instruction = `Arbitrate and synthesize these multi-agent deliberations into a single superior consensus for: "${query}"`;
 
   if (chairModel.providerType === 'webllm') {
-    // The Chairperson sees the sources AND every member's answer, which easily
-    // overflows a 4096-token window untrimmed. Split the budget between them.
-    const budget = localBudget(query, mode);
-    const sourceChars = Math.floor(budget.remaining * 0.4);
-    const perPerspective = Math.floor((budget.remaining - sourceChars) / Math.max(1, analyses.length));
-    const localPerspectives = analyses
-      .map(a => `## [${a.role} (${a.modelName})]\n${truncate(a.analysis, perPerspective)}`)
-      .join('\n\n');
-    const systemPrompt = [
-      "You are the Chairperson of an LLM council. Reconcile the members' perspectives into one answer, " +
-        'resolving any disagreement in favour of what the sources support.',
-      GROUNDING_RULES,
-      CONFIDENCE_RULE,
-      `SOURCES:\n${formatSources(hooks?.sources ?? [], sourceChars)}`,
-    ].join('\n\n');
-    const localInstruction = `Arbitrate and synthesize these multi-agent deliberations into a single superior consensus for: "${budget.query}"`;
-    // The members' resolved models (not necessarily what they were originally set
-    // to, if any of them stepped down) are excluded so the chair never converges on
-    // one of them if it needs to step down itself.
-    const memberModelIds = new Set(analyses.map((a) => a.modelName));
-    const { text: raw, resolvedModelId } = await runLocal(chairModel, systemPrompt, `${localInstruction}\n\n${localPerspectives}`, mode, hooks, memberModelIds);
-    const { answer, confidence } = parseGroundedOutput(raw);
-    if (!answer) throw new Error(`${chairModel.label} returned an empty synthesis.`);
-    return {
-      report: { comprehensiveAnswer: answer, confidence },
-      resolvedModelId: resolvedModelId !== chairModel.id ? resolvedModelId : undefined,
-    };
+    return { report: mergeLocalConsensus(analyses) };
   }
 
   if (chairModel.providerType === 'native-gemini') {

@@ -14,9 +14,10 @@ import { currentEpoch } from './src/engine/cancellation';
 
 // v4: earlier builds saved Gemini defaults here, which a keyless deployment can't run.
 // v5: earlier builds put one model in every seat; the defaults now mix three families.
-// v6: the Council dropped from 4 models (3 members + a chair reusing one of them) to
-// 3: two members deliberate, a third, dedicated model gives the Final Arbitration.
-const STORAGE_KEY = 'llm_council_selections_v6';
+// v7: local Council seats now share one warm WebLLM engine; the local chair is a
+// deterministic merge. Bump this key so browsers do not retain the old three-model
+// seat selections and accidentally keep paying for model swaps.
+const STORAGE_KEY = 'llm_council_selections_v7';
 // v2: Universal Council and Local Assistant merged into one screen with a Quick/
 // Council toggle; the mode values changed from 'council'/'local' to 'council'/'quick'.
 const MODE_STORAGE_KEY = 'llm_council_mode_v2';
@@ -221,11 +222,9 @@ const App: React.FC = () => {
         return;
       }
 
-      // One shared engine backs every seat, so they can never truly run at once --
-      // engineManager's queue already serializes them. Awaiting one seat before
-      // starting the next (rather than Promise.all) makes that explicit, and gives
-      // each seat's step-down ladder (if it needs one) the models earlier seats
-      // already resolved to, so it can never converge on one of them.
+      // One shared engine backs every seat, so they can never truly run at once.
+      // The defaults use one model, which stays warm across both persona passes;
+      // users can still choose distinct models manually when they want diversity.
       const usedModelIds = new Set<string>();
       const results: Array<Partial<AgentAnalysis> & { role: AgentRole }> = [];
       for (const role of COUNCIL_ROLES) {

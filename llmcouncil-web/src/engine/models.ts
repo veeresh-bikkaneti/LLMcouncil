@@ -228,23 +228,26 @@ export const DEFAULT_MODEL_ID = pickForDevice(
 );
 
 export interface CouncilSeatDefaults {
-  /** Model 1, Model 2: two different model families, so they actually disagree
-   *  instead of one model agreeing with itself. */
+  /** Model 1, Model 2: prompt personas backed by one shared loaded model by
+   * default. Users can still choose different models manually, but the fast
+   * path must not pay for model swaps on every Council run. */
   members: [string, string];
-  /** A third, distinct model that only arbitrates -- never one of the members'
-   *  models, so the two deliberating seats and the arbitrator are 3 models total. */
+  /** The chair is normally a deterministic JavaScript merge for local runs, so
+   * it uses the same id only for UI/provider configuration consistency. */
   chair: string;
 }
 
-// Seats run one after another on the shared engine, so each different model is a
-// swap (from the browser cache after the first run). Three seats total: two
-// deliberate, then a third, dedicated model gives the Final Arbitration.
+// Seats run one after another on the shared engine. Keeping all default seats on
+// one model means the engine stays warm across questions and the browser does
+// not repeatedly unload/load/compile different GPU graphs. The local chair is
+// merged deterministically in inferenceService, so this is one model and two
+// short persona generations per Council question.
 const COUNCIL_DESKTOP: CouncilSeatDefaults = {
-  members: ['Qwen2.5-1.5B-Instruct-q4f16_1-MLC', 'SmolLM2-1.7B-Instruct-q4f16_1-MLC'],
+  members: ['Llama-3.2-3B-Instruct-q4f16_1-MLC', 'Llama-3.2-3B-Instruct-q4f16_1-MLC'],
   chair: 'Llama-3.2-3B-Instruct-q4f16_1-MLC',
 };
 const COUNCIL_PHONE: CouncilSeatDefaults = {
-  members: ['Qwen2.5-0.5B-Instruct-q4f16_1-MLC', 'SmolLM2-360M-Instruct-q4f16_1-MLC'],
+  members: ['Llama-3.2-1B-Instruct-q4f16_1-MLC', 'Llama-3.2-1B-Instruct-q4f16_1-MLC'],
   chair: 'Llama-3.2-1B-Instruct-q4f16_1-MLC',
 };
 
@@ -255,22 +258,10 @@ function seatsFit(seats: CouncilSeatDefaults): boolean {
   });
 }
 
-/** Default Council line-up for this device: 3 models total (Alibaba, Hugging Face, Meta). */
+/** Default Council line-up for this device: one shared model across two personas. */
 export const DEFAULT_COUNCIL_SEATS: CouncilSeatDefaults = seatsFit(COUNCIL_DESKTOP)
   ? COUNCIL_DESKTOP
   : {
       members: COUNCIL_PHONE.members.map(pickForDevice) as [string, string],
       chair: pickForDevice(COUNCIL_PHONE.chair),
     };
-
-// The "3 distinct models" property is a config-time invariant, not something the
-// types enforce: pickForDevice() can fall back to the same shared default for more
-// than one seat if a future model resize or an added constrained tier makes that
-// the only fit. Fail loudly at load rather than silently running a Council where
-// the "arbitrator" is actually one of the two members debating itself.
-if (DEFAULT_COUNCIL_SEATS.members.includes(DEFAULT_COUNCIL_SEATS.chair)) {
-  throw new Error(
-    `Council config invariant violated: chair (${DEFAULT_COUNCIL_SEATS.chair}) must not be one of the ` +
-      `deliberating members (${DEFAULT_COUNCIL_SEATS.members.join(', ')}).`
-  );
-}
