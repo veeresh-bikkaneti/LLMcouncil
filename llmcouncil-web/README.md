@@ -1,62 +1,72 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# LLM Council
 
-# Run and deploy your AI Studio app
+Ask one question, get several perspectives, read one answer. Everything runs on your
+own machine: no cloud models, no API keys, no accounts, no server of ours.
 
-This contains everything you need to run your app locally.
+**Council mode** sends your question to three differently-prompted members (Factualist,
+Analyst, Skeptic) at the same time, then a Chairperson merges their answers into one
+streamed verdict. **Quick mode** is a single streamed answer.
 
-View your app in AI Studio: https://ai.studio/apps/drive/1r719HFJ86ufWnnaX-uNFWuCMeYcqUkO6
+## Run it
 
-## Run Locally
+You need Node 20+ and a local model server. [Ollama](https://ollama.com/download) is the
+easiest:
 
-**Prerequisites:**  Node.js
+```bash
+ollama pull llama3.2          # ~2 GB; any chat model works
+cd llmcouncil-web
+npm install
+npm run dev                   # http://localhost:3000
+```
 
+The page finds Ollama on `localhost:11434`, lists your installed models and picks one.
+Any server with an OpenAI-compatible `/v1/chat/completions` endpoint works too
+(llama.cpp's `llama-server`, LM Studio, vLLM): change the URL in Settings.
 
-1. Install dependencies:
-   `npm install`
-2. (Optional) Set `GEMINI_API_KEY` in [.env.local](.env.local) to bake a Gemini key into
-   the build. Without it, Gemini models stay hidden until a user connects their own key.
-3. Run the app:
-   `npm run dev`
+**No install?** Choose *In this browser* in Settings. It runs a small model on your GPU
+with WebGPU (desktop Chrome/Edge). It needs a one-time 1–2 GB download and runs the
+council members one after another, so it is the slow path.
 
-## No cloud API key required
+## Why it is fast
 
-Both modes run entirely client-side via [`@mlc-ai/web-llm`](https://github.com/mlc-ai/web-llm)
-and WebGPU — no server, no account, no key. Six quantized instruct models are available,
-from a "Fast & Light" tier (Qwen2.5 1.5B / Llama 3.2 3B, ~1.6-2.3GB) up to 7-8B models
-(~5GB). Weights download once and are cached by the browser; both modes share a single
-loaded model, so switching between them doesn't load a second one.
+- The model runs natively in Ollama/llama.cpp, not inside a browser tab.
+- Council members run in parallel (Ollama serves concurrent requests; tune with
+  `OLLAMA_NUM_PARALLEL`, or `-np 3` for `llama-server`). One loaded model plays every seat.
+- Every answer streams, and each generation has a token cap, so a council run costs
+  at most three short answers plus one merge.
+- Nothing is fetched at startup: no CDN scripts, fonts or search calls. The main bundle
+  is ~70 kB gzipped; the browser-model runtime loads only if you pick that backend.
+- Web lookups are opt-in (below) instead of running before every question.
 
-- **Universal Council**: three council members and a Chairperson, all on in-browser models
-  by default (Llama 3.2 3B, one shared download — the Council makes four passes per
-  question, so it defaults to a faster model). The Privacy Shield scrubs PII on-device.
-  Any seat can be switched to a cloud model (Gemini, OpenAI, Anthropic, xAI, DeepSeek...)
-  once you connect your own key in the Model Hub — keys stay in your browser.
-- **Local Assistant**: a single grounded question-and-answer view (default: Qwen2.5 7B
-  Instruct, ~5.1GB) — pick a Fast tier model first on modest hardware or metered connections.
+## Optional: Wikipedia grounding
 
-In-browser models never rely on LLM-native function calling, regardless of tier —
-even the larger models here aren't trusted to drive tools reliably. Instead a plain
-JavaScript orchestrator (`src/engine/chatbot.ts`) runs the retrieval step itself before
-the model ever sees the query:
+Settings → *Ground answers in Wikipedia* adds one keyless Wikipedia lookup per question
+and passes the excerpts to the models as citable sources. Only your question text, with
+emails, phone numbers, SSNs and dates of birth removed, is sent. Off by default.
 
-1. `executeWebSearch(query)` (`src/engine/search.ts`) fetches grounding sources — using
-   your own Tavily/Brave API key if you supply one in the Local Assistant setup panel,
-   or falling back to Wikipedia's free, keyless public API when you don't.
-2. The results are formatted into an array of `{ id, title, url, content }` sources and
-   injected into a locked-down system prompt.
-3. The model runs at `temperature: 0.0` and is instructed to only rely on those sources,
-   cite every factual claim inline (`[1]`, `[2]`, ...), and end its answer with a
-   `Confidence Level: [High/Medium/Low]` tag reflecting how well the sources actually
-   covered the question.
-4. A collapsible **Grounding Inspection** drawer lets you audit the raw sources behind
-   any answer.
+## Hosting the page elsewhere
 
-Requirements: a browser with WebGPU (recent desktop Chrome/Edge). The model weights
-(~1.6GB to ~5.1GB depending on which tier you pick) download once and are cached by
-the browser afterwards.
+If you serve the built page from another origin (e.g. GitHub Pages), allow it in Ollama:
 
-User input and retrieved source text are also scrubbed of common PII patterns (SSNs,
-phone numbers, dates of birth, emails) client-side, before they are sent to any search
-API or shown in the UI (`src/engine/sanitize.ts`).
+```bash
+OLLAMA_ORIGINS="https://<you>.github.io" ollama serve
+```
+
+Browsers may ask permission to reach a local network address. Safari blocks plain-HTTP
+local servers from HTTPS pages; use `npm run dev` or `npm run preview` there.
+
+## Development
+
+```bash
+npm test          # unit tests (streaming, think-tag filter, council orchestration)
+npm run typecheck
+npm run build
+```
+
+```
+src/lib/backends/   openai.ts (Ollama & friends), webllm.ts (in-browser)
+src/lib/council.ts  quick + council orchestration
+src/lib/prompts.ts  personas and chair prompt
+src/lib/search.ts   optional Wikipedia lookup
+src/components/     SeatCard, SettingsDialog, Markdown
+```
