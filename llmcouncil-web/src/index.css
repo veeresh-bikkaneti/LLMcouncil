@@ -1,0 +1,31 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+body {
+  @apply bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100 antialiased;
+}
+
+/* Progressive enhancement: grows with the question where supported (see field-sizing). */
+textarea.auto-grow {
+  field-sizing: content;
+  min-block-size: 3lh;
+  max-block-size: 12lh;
+}
+
+dialog::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+
+.caret::after {
+  content: '▍';
+  @apply ml-0.5 animate-pulse text-violet-500;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret::after {
+    animation: none;
+  }
+}

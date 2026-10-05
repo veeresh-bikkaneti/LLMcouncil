@@ -1,7 +1,6 @@
-// Lightweight, client-side PII scrubber. Applied to every user query and every
-// retrieved grounding source before it reaches the model, the network, or the UI --
-// so personal data (SSNs, phone numbers, dates of birth, emails) is never forwarded
-// to a search connector or echoed back in a response.
+// Scrubs obvious personal data (SSNs, emails, phone numbers, dates of birth) from text
+// before it is sent to the optional Wikipedia grounding lookup. Local models never need
+// this: the question never leaves the machine unless grounding is switched on.
 
 const SSN_RE = /\b\d{3}-\d{2}-\d{4}\b/g;
 // Bare 9-digit SSNs (no dashes) are common enough in casual typing to be worth the

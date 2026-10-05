@@ -35,11 +35,13 @@ jobs:
         working-directory: llmcouncil-web
         run: npm ci
 
+      - name: Test
+        working-directory: llmcouncil-web
+        run: npm test
+
       - name: Build (base path = /<repo>/ for project Pages)
         working-directory: llmcouncil-web
         run: npm run build -- --base=/${{ github.event.repository.name }}/
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
