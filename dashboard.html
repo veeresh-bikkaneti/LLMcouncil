@@ -3,31 +3,37 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Productivity</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='2' width='24' height='28' rx='4' fill='%23faf9f5' stroke='%23D97757' stroke-width='2'/%3E%3Crect x='8' y='0' width='16' height='5' rx='2.5' fill='%23D97757'/%3E%3Cpath d='M9 13l3 3 5-5' fill='none' stroke='%23D97757' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Crect x='20' y='12' width='5' height='2' rx='1' fill='%23c4c4c2'/%3E%3Crect x='9' y='20' width='10' height='2' rx='1' fill='%23c4c4c2'/%3E%3Crect x='9' y='25' width='7' height='2' rx='1' fill='%23c4c4c2'/%3E%3C/svg%3E">
+  <title>Muse · Your desk</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='4' y='2' width='24' height='28' rx='4' fill='%230e1613' stroke='%23f0b43c' stroke-width='2'/%3E%3Crect x='8' y='0' width='16' height='5' rx='2.5' fill='%23f0b43c'/%3E%3Cpath d='M9 13l3 3 5-5' fill='none' stroke='%23f0b43c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Crect x='20' y='12' width='5' height='2' rx='1' fill='%23c4c4c2'/%3E%3Crect x='9' y='20' width='10' height='2' rx='1' fill='%23c4c4c2'/%3E%3Crect x='9' y='25' width='7' height='2' rx='1' fill='%23c4c4c2'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&family=Instrument+Serif:ital@0;1&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg-primary: #faf9f5;
-      --bg-secondary: #F5F4EF;
-      --bg-card: #ffffff;
-      --text-primary: #141413;
-      --text-secondary: #5c5c5a;
-      --text-muted: #8c8c8a;
-      --accent: #D97757;
-      --accent-hover: #c4684a;
-      --border: #e5e4df;
-      --border-light: #eeeee9;
-      --shadow: rgba(20, 20, 19, 0.04);
-      --shadow-hover: rgba(20, 20, 19, 0.08);
+      color-scheme: light dark;
+      /* Muse: a night studio by default, parchment by day. Marigold is the one sharp accent. */
+      --bg-primary: light-dark(#f4eee0, #0e1613);
+      --bg-secondary: light-dark(#ebe3cf, #15201b);
+      --bg-card: light-dark(#fbf7ec, #1b2a24);
+      --text-primary: light-dark(#1b2a24, #f1ead8);
+      --text-secondary: light-dark(#4d5b53, #b9c2b4);
+      --text-muted: light-dark(#76806f, #7f8c82);
+      --accent: light-dark(#c4412a, #f0b43c);
+      --accent-hover: light-dark(#a93420, #ffc857);
+      --on-accent: light-dark(#fbf7ec, #0e1613);
+      --border: light-dark(#d9cfb6, #263830);
+      --border-light: light-dark(#e3dbc4, #20312a);
+      --shadow: light-dark(rgba(27, 42, 36, 0.06), rgba(0, 0, 0, 0.28));
+      --shadow-hover: light-dark(rgba(27, 42, 36, 0.12), rgba(0, 0, 0, 0.45));
+      --font-display: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;
+      --font-body: 'Bricolage Grotesque', 'Avenir Next', 'Segoe UI', sans-serif;
+      --font-mono: 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace;
     }
 
     body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-family: var(--font-body);
       background: var(--bg-primary);
       color: var(--text-primary);
       height: 100vh;
@@ -113,7 +119,7 @@
 
     button.primary {
       background: var(--accent);
-      color: white;
+      color: var(--on-accent);
       border-color: var(--accent);
     }
 
@@ -196,7 +202,7 @@
     }
 
     .cards.drag-over {
-      background: rgba(217, 119, 87, 0.05);
+      background: color-mix(in srgb, var(--accent) 8%, transparent);
       border-radius: 8px;
     }
 
@@ -315,7 +321,7 @@
       content: '';
       width: 5px;
       height: 9px;
-      border: solid white;
+      border: solid var(--on-accent);
       border-width: 0 2px 2px 0;
       transform: rotate(45deg);
       margin-bottom: 2px;
@@ -332,7 +338,7 @@
       padding: 14px 28px;
       background: var(--accent);
       border: none;
-      color: white;
+      color: var(--on-accent);
     }
 
     .empty-state button:hover {
@@ -352,7 +358,7 @@
       font-weight: 500;
       opacity: 0;
       transition: opacity 0.2s ease;
-      box-shadow: 0 4px 20px rgba(20, 20, 19, 0.15);
+      box-shadow: 0 4px 20px var(--shadow-hover);
       z-index: 200;
     }
 
@@ -433,7 +439,7 @@
     }
 
     .list-section.drag-over {
-      background: rgba(217, 119, 87, 0.05);
+      background: color-mix(in srgb, var(--accent) 8%, transparent);
       border-radius: 8px;
       margin: 0 -12px 32px;
       padding: 0 12px;
@@ -891,7 +897,7 @@
       font-size: 13px;
       line-height: 1.6;
       white-space: pre-wrap;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-family: var(--font-mono);
       overflow-y: auto;
       display: none;
       color: var(--text-secondary);
@@ -990,7 +996,7 @@
       background: var(--bg-secondary);
       padding: 2px 6px;
       border-radius: 4px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-family: var(--font-mono);
       color: var(--text-primary);
     }
     .markdown-content pre {
@@ -1029,7 +1035,7 @@
       left: 0;
       right: 0;
       bottom: 0;
-      background: rgba(20, 20, 19, 0.5);
+      background: light-dark(rgba(27, 42, 36, 0.45), rgba(0, 0, 0, 0.65));
       z-index: 100;
       align-items: center;
       justify-content: center;
@@ -1048,7 +1054,7 @@
       overflow: hidden;
       display: flex;
       flex-direction: column;
-      box-shadow: 0 20px 60px rgba(20, 20, 19, 0.2);
+      box-shadow: 0 20px 60px var(--shadow-hover);
     }
 
     .modal-header {
@@ -1113,7 +1119,7 @@
       padding: 12px;
       color: var(--text-primary);
       font-size: 13px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-family: var(--font-mono);
       line-height: 1.5;
       min-height: 300px;
       resize: vertical;
@@ -1187,21 +1193,195 @@
       color: var(--text-muted);
       margin-top: 2px;
     }
+
+    /* ===== MUSE: atmosphere, type, motion ===== */
+
+    body {
+      background:
+        radial-gradient(60rem 36rem at 8% -10%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%),
+        radial-gradient(48rem 30rem at 100% 110%, light-dark(rgba(60, 110, 90, 0.16), rgba(52, 120, 96, 0.22)), transparent 60%),
+        linear-gradient(color-mix(in srgb, var(--border-light) 55%, transparent) 1px, transparent 1px) 0 0 / 100% 32px,
+        var(--bg-primary);
+      background-attachment: fixed;
+      font-optical-sizing: auto;
+    }
+
+    /* Paper grain over everything, kept off the pointer's path. */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 300;
+      opacity: 0.05;
+      mix-blend-mode: multiply;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+
+    @media (prefers-color-scheme: dark) {
+      body::before { opacity: 0.06; mix-blend-mode: screen; }
+    }
+
+    h1, .greeting {
+      font-family: var(--font-display);
+      font-weight: 400;
+      letter-spacing: -0.01em;
+    }
+
+    h1 { font-size: 2rem; line-height: 1; font-style: italic; }
+
+    .greeting {
+      font-size: 1.05rem;
+      color: var(--text-secondary);
+      margin-top: 2px;
+      font-style: italic;
+    }
+
+    header { border-bottom: 1px solid var(--border); position: relative; }
+    .header-left { flex-wrap: wrap; row-gap: 10px; }
+
+    header::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      bottom: -1px;
+      width: 96px;
+      height: 2px;
+      background: var(--accent);
+    }
+
+    .view-toggle {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+    }
+
+    .view-toggle button { border-radius: 999px; font-size: 13px; letter-spacing: 0.01em; }
+
+    .view-toggle button.active {
+      background: var(--accent);
+      color: var(--on-accent);
+      box-shadow: none;
+    }
+
+    .view-toggle button.active:hover { background: var(--accent); color: var(--on-accent); }
+
+    button { border-radius: 999px; font-weight: 500; transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease, color 0.18s ease; }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .column {
+      border: 1px solid var(--border);
+      border-top: 3px solid var(--accent);
+      border-radius: 4px 4px 14px 14px;
+      background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+      backdrop-filter: blur(6px);
+    }
+
+    .column-header {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.14em;
+    }
+
+    .column-header .count {
+      font-family: var(--font-mono);
+      color: var(--accent);
+    }
+
+    .task-card {
+      border-radius: 6px 14px 14px 14px;
+      border-left: 3px solid transparent;
+    }
+
+    .task-card:hover {
+      border-left-color: var(--accent);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px var(--shadow-hover);
+    }
+
+    .card-title { font-weight: 500; }
+    .card-note, .file-path { font-family: var(--font-mono); font-size: 11px; }
+
+    .empty-state { padding-block: 12vh 8vh; }
+
+    .empty-state .lede {
+      font-family: var(--font-display);
+      font-size: clamp(2rem, 4vw, 3rem);
+      font-style: italic;
+      line-height: 1.05;
+      color: var(--text-primary);
+      margin-bottom: 10px;
+    }
+
+    .empty-state .sub {
+      max-width: 34ch;
+      margin: 0 auto 28px;
+      color: var(--text-secondary);
+      text-wrap: balance;
+    }
+
+    .empty-state button { border-radius: 999px; font-size: 15px; }
+
+    .status-bar {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      border-radius: 999px;
+      background: var(--accent);
+      color: var(--on-accent);
+    }
+
+    .modal { border-radius: 14px; border: 1px solid var(--border); }
+
+    /* One orchestrated entrance. The .intro class is on for ~1.5s per load, so edits never replay it. */
+    @media (prefers-reduced-motion: no-preference) {
+      @keyframes rise {
+        from { opacity: 0; transform: translateY(14px); }
+        to { opacity: 1; transform: none; }
+      }
+      @keyframes draw {
+        from { width: 0; }
+        to { width: 96px; }
+      }
+
+      .intro header > *,
+      .intro .greeting,
+      .intro .empty-state > *,
+      .intro .column,
+      .intro .task-card:nth-child(-n+6) {
+        animation: rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+      }
+
+      .intro header .header-left { animation-delay: 60ms; }
+      .intro header .buttons { animation-delay: 180ms; }
+      .intro .empty-state > :nth-child(1) { animation-delay: 220ms; }
+      .intro .empty-state > :nth-child(2) { animation-delay: 320ms; }
+      .intro .empty-state > :nth-child(3) { animation-delay: 420ms; }
+      .intro .column:nth-child(1) { animation-delay: 140ms; }
+      .intro .column:nth-child(2) { animation-delay: 240ms; }
+      .intro .column:nth-child(3) { animation-delay: 340ms; }
+      .intro .column:nth-child(n+4) { animation-delay: 440ms; }
+      .intro .task-card:nth-child(2) { animation-delay: 80ms; }
+      .intro .task-card:nth-child(3) { animation-delay: 160ms; }
+      .intro .task-card:nth-child(4) { animation-delay: 240ms; }
+      .intro .task-card:nth-child(5) { animation-delay: 320ms; }
+      .intro .task-card:nth-child(6) { animation-delay: 400ms; }
+      .intro header::after { animation: draw 0.9s 0.3s cubic-bezier(0.2, 0.7, 0.2, 1) backwards; }
+    }
   </style>
 </head>
 <body>
   <header>
     <div class="header-left">
-      <svg width="28" height="28" viewBox="0 0 32 32" style="margin-right: 12px; flex-shrink: 0;">
-        <rect x="4" y="2" width="24" height="28" rx="4" fill="#faf9f5" stroke="#D97757" stroke-width="2"/>
-        <rect x="8" y="0" width="16" height="5" rx="2.5" fill="#D97757"/>
-        <path d="M9 13l3 3 5-5" fill="none" stroke="#D97757" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-        <rect x="20" y="12" width="5" height="2" rx="1" fill="#c4c4c2"/>
-        <rect x="9" y="20" width="10" height="2" rx="1" fill="#c4c4c2"/>
-        <rect x="9" y="25" width="7" height="2" rx="1" fill="#c4c4c2"/>
+      <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true" style="margin-right: 12px; flex-shrink: 0;">
+        <rect x="4" y="2" width="24" height="28" rx="4" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--text-muted)"/>
+        <rect x="8" y="0" width="16" height="5" rx="2.5" fill="var(--accent)"/>
+        <path d="M9 14l3.5 3.5L19 11" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="9" y="22" width="11" height="2" rx="1" fill="currentColor" style="color: var(--text-muted)"/>
       </svg>
       <div>
-        <h1>Productivity</h1>
+        <h1>Muse</h1>
+        <p class="greeting" id="greeting">Welcome back.</p>
         <div id="filePath" class="file-path"></div>
       </div>
       <div class="view-toggle" id="mainTabToggle">
@@ -1214,9 +1394,9 @@
       </div>
     </div>
     <div class="buttons">
-      <button id="openTaskBtn">Select File</button>
-      <button id="openMemoryBtn" style="display: none;">Open Folder</button>
-      <button id="saveBtn" class="primary" disabled style="display: none;">Save</button>
+      <button id="openTaskBtn">Open tasks file</button>
+      <button id="openMemoryBtn" style="display: none;">Open memory folder</button>
+      <button id="saveBtn" class="primary" disabled style="display: none;">Save changes</button>
     </div>
   </header>
 
@@ -1225,8 +1405,9 @@
     <div class="list-view" id="listView" style="display: none;"></div>
     <div class="board" id="board">
       <div class="empty-state" id="boardEmptyState" style="width: 100%;">
-        <p style="margin-bottom: 24px; font-size: 18px; font-weight: 600; color: var(--text-primary);">Select your TASKS.md file</p>
-        <button id="openBtnLarge">Select TASKS.md</button>
+        <p class="lede">Let's pick up where you left off.</p>
+        <p class="sub">Open your TASKS.md and I'll keep it in step as you work.</p>
+        <button id="openBtnLarge">Open TASKS.md</button>
       </div>
     </div>
   </div>
@@ -1234,8 +1415,9 @@
   <!-- MEMORY TAB PANEL -->
   <div class="tab-panel" id="memoryPanel">
     <div id="memoryEmptyState" class="empty-state">
-      <p style="margin-bottom: 24px; font-size: 18px; font-weight: 600; color: var(--text-primary);">Select your project folder</p>
-      <button id="openMemoryBtnLarge">Select Folder</button>
+      <p class="lede">Where do you keep your notes?</p>
+      <p class="sub">Open the folder with CLAUDE.md and memory/. Nothing is written until you save.</p>
+      <button id="openMemoryBtnLarge">Open folder</button>
     </div>
     <div id="memoryMainContent" style="display: none; flex-direction: column; min-height: 0; flex: 1;">
       <div class="memory-tabs" id="memoryTabsContainer"></div>
@@ -1649,7 +1831,7 @@
         </div>
         <div class="cards" data-column="${id}"></div>
         <div class="add-card">
-          <button data-add="${id}">+ Add task</button>
+          <button data-add="${id}">+ Add a task</button>
         </div>
       `;
 
@@ -1861,9 +2043,9 @@
         lastModified = file.lastModified;
         hasChanges = false;
         saveBtn.disabled = true;
-        showStatus('Saved');
+        showStatus('Saved.');
       } catch (e) {
-        showStatus('Save failed: ' + e.message);
+        showStatus("Couldn't save: " + e.message);
       }
       isSaving = false;
     }
@@ -1879,7 +2061,7 @@
           sections = result.sections;
           tasks = result.tasks;
           renderTasks();
-          showStatus('Reloaded');
+          showStatus('Refreshed from file.');
         }
       } catch (e) { console.log('Watch error:', e); }
     }
@@ -1908,7 +2090,7 @@
       const addSectionBtn = document.createElement('div');
       addSectionBtn.className = 'column';
       addSectionBtn.style.cssText = 'background: transparent; border: 2px dashed var(--border); display: flex; align-items: center; justify-content: center; cursor: pointer; min-height: 120px;';
-      addSectionBtn.innerHTML = '<span style="color: var(--text-muted); font-size: 14px; font-weight: 500;">+ Add Section</span>';
+      addSectionBtn.innerHTML = '<span style="color: var(--text-muted); font-size: 14px; font-weight: 500;">+ New section</span>';
       addSectionBtn.addEventListener('click', () => startAddingSection(addSectionBtn));
       board.appendChild(addSectionBtn);
     }
@@ -1928,7 +2110,7 @@
       const sectionName = sections.find(s => s.id === quickAddSection)?.name || 'Select section';
       quickAdd.innerHTML = `
         <span class="checkbox" style="opacity: 0.3;"></span>
-        <input type="text" class="quick-add-input" placeholder="Add a task..." id="quickAddInput">
+        <input type="text" class="quick-add-input" placeholder="What needs doing?" id="quickAddInput">
         <span class="quick-add-section" id="quickAddSectionBtn">${escapeHtml(sectionName)}</span>
       `;
       listView.appendChild(quickAdd);
@@ -2041,7 +2223,7 @@
       // Add Section button
       const addSectionBtn = document.createElement('div');
       addSectionBtn.className = 'list-add-section';
-      addSectionBtn.textContent = '+ Add Section';
+      addSectionBtn.textContent = '+ New section';
       addSectionBtn.addEventListener('click', () => { startAddingListSection(addSectionBtn); });
       listView.appendChild(addSectionBtn);
     }
@@ -2169,7 +2351,7 @@
       } else {
         const addNote = document.createElement('div');
         addNote.className = 'list-item-note add-note';
-        addNote.textContent = '+ Add note';
+        addNote.textContent = '+ Add a note';
         addNote.addEventListener('click', (e) => {
           e.stopPropagation();
           startEditingListNote(addNote, task);
@@ -2215,7 +2397,7 @@
 
       const addSubtask = document.createElement('div');
       addSubtask.className = 'list-item-add-subtask';
-      addSubtask.textContent = '+ Add subtask';
+      addSubtask.textContent = '+ Add a step';
       addSubtask.addEventListener('click', (e) => {
         e.stopPropagation();
         startAddingListSubtask(addSubtask, task);
@@ -2448,9 +2630,9 @@
         startWatching();
         taskFileName = file.name;
         filePathEl.textContent = file.name;
-        showStatus('Loaded ' + file.name);
+        showStatus('Opened ' + file.name + '.');
       } catch (e) {
-        if (e.name !== 'AbortError') { showStatus('Error: ' + e.message); }
+        if (e.name !== 'AbortError') { showStatus("Couldn't open that: " + e.message); }
       }
     }
 
@@ -2465,8 +2647,8 @@
         await writable.close();
         hasChanges = false;
         saveBtn.disabled = true;
-        showStatus('Saved');
-      } catch (e) { showStatus('Error: ' + e.message); }
+        showStatus('Saved.');
+      } catch (e) { showStatus("Couldn't open that: " + e.message); }
     });
 
     window.addEventListener('beforeunload', (e) => {
@@ -2617,10 +2799,10 @@
         memoryEmptyState.style.display = 'none';
         memoryMainContent.style.display = 'flex';
         filePathEl.textContent = memoryDirHandle.name;
-        showStatus('Loaded memory from ' + memoryDirHandle.name);
+        showStatus('Opened memory from ' + memoryDirHandle.name + '.');
 
       } catch (e) {
-        if (e.name !== 'AbortError') { showStatus('Error: ' + e.message); }
+        if (e.name !== 'AbortError') { showStatus("Couldn't open that: " + e.message); }
       }
     }
 
@@ -3056,7 +3238,7 @@
         } else if (type === 'newDirFile') {
           const dirName = modalOverlay.dataset.dirName;
           let fileName = document.getElementById('newFileName').value.trim();
-          if (!fileName) { showStatus('Please enter a filename'); return; }
+          if (!fileName) { showStatus('Give the file a name first.'); return; }
           if (!fileName.endsWith('.md')) fileName += '.md';
 
           const memoryDir = await memoryDirHandle.getDirectoryHandle('memory');
@@ -3082,7 +3264,7 @@
         renderMemory();
 
       } catch (e) {
-        showStatus('Error saving: ' + e.message);
+        showStatus("Couldn't save: " + e.message);
       }
     }
 
@@ -3106,6 +3288,32 @@
     window.openNewFileModal = openNewFileModal;
     window.openEditModal = openEditModal;
     window.filterMemoryDirectory = filterMemoryDirectory;
+  </script>
+
+  <script>
+    // Muse: time-aware greeting, and a one-time entrance (header on load, board on first render).
+    (function () {
+      var h = new Date().getHours();
+      var g = h < 5 ? 'Still up? Let\'s keep it light.' : h < 12 ? 'Good morning. One thing at a time.' : h < 18 ? 'Good afternoon. Here\'s your desk.' : 'Good evening. What still matters today?';
+      var el = document.getElementById('greeting');
+      if (el) el.textContent = g;
+
+      function playIntro() {
+        document.body.classList.add('intro');
+        setTimeout(function () { document.body.classList.remove('intro'); }, 1600);
+      }
+      playIntro();
+
+      var board = document.getElementById('board');
+      if (!board) return;
+      var seen = false;
+      new MutationObserver(function () {
+        if (!seen && board.querySelector('.column')) {
+          seen = true;
+          playIntro();
+        }
+      }).observe(board, { childList: true });
+    })();
   </script>
 </body>
 </html>
