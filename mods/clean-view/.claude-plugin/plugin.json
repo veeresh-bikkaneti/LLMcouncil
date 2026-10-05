@@ -1,0 +1,6 @@
+{
+  "name": "clean-view",
+  "version": "0.1.0",
+  "description": "Hides tool calls and raw code from the chat and shows a minimalist progress checklist instead.",
+  "types": "./types/index.d.ts"
+}
