@@ -1,0 +1,86 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { briefFrom, cpuFallbackAfterGpuError, parseGithub } from "./browserHearing.ts";
+
+describe("cpuFallbackAfterGpuError", () => {
+  it("does not start the CPU weights after a network failure", () => {
+    assert.equal(cpuFallbackAfterGpuError(new TypeError("Failed to fetch")), false);
+    assert.equal(cpuFallbackAfterGpuError(new Error("NetworkError when attempting to fetch resource.")), false);
+    assert.equal(cpuFallbackAfterGpuError("Load failed"), false);
+    assert.equal(cpuFallbackAfterGpuError(new Error("Failed to load resource: 404")), false);
+  });
+
+  it("does start the CPU weights after a GPU device failure", () => {
+    assert.equal(cpuFallbackAfterGpuError(new Error("GPUPipelineError: shader-f16 is missing")), true);
+    assert.equal(cpuFallbackAfterGpuError(new TypeError("requestDevice failed")), true);
+    assert.equal(cpuFallbackAfterGpuError(new Error("out of memory")), true);
+  });
+});
+
+describe("parseGithub", () => {
+  it("reads an owner and repo", () => {
+    assert.deepEqual(parseGithub("https://github.com/veeresh-bikkaneti/LLMcouncil"), {
+      owner: "veeresh-bikkaneti",
+      repo: "LLMcouncil",
+    });
+    assert.deepEqual(parseGithub("https://www.github.com/veeresh-bikkaneti/LLMcouncil.git"), {
+      owner: "veeresh-bikkaneti",
+      repo: "LLMcouncil",
+    });
+  });
+
+  it("keeps a blob path and drops a traversal", () => {
+    assert.deepEqual(
+      parseGithub("https://github.com/veeresh-bikkaneti/LLMcouncil/blob/main/src/agents.ts"),
+      { owner: "veeresh-bikkaneti", repo: "LLMcouncil", path: "src/agents.ts" },
+    );
+    assert.deepEqual(parseGithub("https://github.com/acme/repo/blob/main/../secrets.env"), {
+      owner: "acme",
+      repo: "repo",
+    });
+  });
+
+  it("rejects anything that is not a public GitHub repo", () => {
+    assert.equal(parseGithub("https://gitlab.com/acme/repo"), null);
+    assert.equal(parseGithub("https://github.com/only-owner"), null);
+    assert.equal(parseGithub("not a url"), null);
+  });
+});
+
+describe("briefFrom", () => {
+  it("accepts aliased keys, a string claim, and a percent", () => {
+    const brief = briefFrom(
+      "lens",
+      '{"Answer":["The label is a heading."],"claims":"Label is a heading.","confidence":"70%"}',
+    );
+    assert.equal(brief.status, "done");
+    assert.equal(brief.answer, "The label is a heading.");
+    assert.deepEqual(brief.claims, ["Label is a heading."]);
+    assert.equal(brief.confidence, 70);
+  });
+
+  it("keeps the later object when the sample is echoed", () => {
+    const text = `{"stance":"Button looks like a title.","answer":"A tired person will not tap it.","claims":["Label is a heading."],"confidence":55}
+{"stance":"The loop has no guard.","answer":"An empty list crashes it.","claims":["Empty list crashes the loop."],"confidence":0.8}`;
+    const brief = briefFrom("stacks", text);
+    assert.equal(brief.answer, "An empty list crashes it.");
+    assert.equal(brief.confidence, 80);
+    assert.deepEqual(brief.claims, ["Empty list crashes the loop."]);
+  });
+
+  it("repairs a trailing comma instead of dropping the claims", () => {
+    const brief = briefFrom(
+      "pulse",
+      '{"stance":"The user is stuck.","answer":"They cannot see the next step.","claims":["The user is blocked.",],"confidence":40,}',
+    );
+    assert.equal(brief.answer, "They cannot see the next step.");
+    assert.deepEqual(brief.claims, ["The user is blocked."]);
+    assert.equal(brief.confidence, 40);
+  });
+
+  it("keeps the prose when the only object is a repo snippet", () => {
+    const brief = briefFrom("lens", 'A tired person will miss the button. {"name":"council"}');
+    assert.equal(brief.answer, "A tired person will miss the button.");
+    assert.equal(brief.stance, "No stance filed.");
+  });
+});
