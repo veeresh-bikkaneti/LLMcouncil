@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Newsreader", "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+  --font-mono: "Spline Sans Mono", ui-monospace, monospace;
+
+  --color-bg: #12100e;
+  --color-surface: #1c1916;
+  --color-raised: #26211c;
+  --color-fg: #f4efe6;
+  --color-muted: #a89b8c;
+  --color-accent: #e07a3d;
+  --color-line: #3a322b;
+  --color-paper: #f3ecdf;
+  --color-ink: #1a1612;
+
+  --radius-card: 1.25rem;
+}
+
+@layer base {
+  html {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-display);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    min-height: 100%;
+    line-height: 1.5;
+    background-color: var(--color-bg);
+    background-image:
+      radial-gradient(
+        ellipse 70% 42% at 50% -8%,
+        color-mix(in oklab, var(--color-accent) 18%, transparent),
+        transparent 60%
+      ),
+      repeating-linear-gradient(
+        to bottom,
+        transparent 0,
+        transparent 31px,
+        color-mix(in oklab, var(--color-fg) 4%, transparent) 32px
+      );
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-accent) 45%, transparent);
+    color: var(--color-fg);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+.rise {
+  animation: rise 560ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+.d1 { animation-delay: 40ms; }
+.d2 { animation-delay: 130ms; }
+.d3 { animation-delay: 220ms; }
+.d4 { animation-delay: 310ms; }
+
+@keyframes scan {
+  from { transform: translateY(-120%); }
+  to { transform: translateY(280%); }
+}
+
+.thinking {
+  position: relative;
+  overflow: hidden;
+}
+
+.thinking::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: var(--color-accent);
+  animation: scan 1.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .thinking::after {
+    animation: none;
+  }
+
+  .rise {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
