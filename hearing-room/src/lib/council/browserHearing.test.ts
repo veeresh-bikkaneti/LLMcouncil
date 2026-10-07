@@ -34,6 +34,8 @@ describe("cpuFallbackAfterGpuError", () => {
     assert.equal(cpuFallbackAfterGpuError(new Error("GPUPipelineError: shader-f16 is missing")), true);
     assert.equal(cpuFallbackAfterGpuError(new TypeError("requestDevice failed")), true);
     assert.equal(cpuFallbackAfterGpuError(new Error("out of memory")), true);
+    assert.equal(cpuFallbackAfterGpuError(undefined), true);
+    assert.equal(cpuFallbackAfterGpuError(null), true);
   });
 });
 
