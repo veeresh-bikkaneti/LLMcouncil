@@ -1,6 +1,20 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { briefFrom, cpuFallbackAfterGpuError, parseGithub } from "./browserHearing.ts";
+import { briefFrom, completionFrom, cpuFallbackAfterGpuError, parseGithub } from "./browserHearing.ts";
+
+describe("completionFrom", () => {
+  it("drops the prompt and keeps the new JSON", () => {
+    const prompt = "<|im_start|>system\nYou are Lens.<|im_end|>\n<|im_start|>assistant\n";
+    const full = `${prompt}{"stance":"The label is wrong.","answer":"Rename the button."}`;
+    assert.equal(completionFrom(full, prompt), '{"stance":"The label is wrong.","answer":"Rename the button."}');
+  });
+
+  it("returns nothing when the model only echoed the prompt", () => {
+    const prompt = "<|im_start|>user\nMatter<|im_end|>\n<|im_start|>assistant\n";
+    assert.equal(completionFrom(prompt, prompt), "");
+    assert.equal(completionFrom("system You are Lens.", "<|im_start|>system\nYou are Lens.<|im_end|>"), "");
+  });
+});
 
 describe("cpuFallbackAfterGpuError", () => {
   it("does not start the CPU weights after a network failure", () => {

@@ -15,10 +15,27 @@ import {
 
 const MODEL = "onnx-community/SmolLM2-360M-Instruct-ONNX";
 
-type Gen = (
-  messages: { role: string; content: string }[],
-  options: { max_new_tokens: number; do_sample: false; repetition_penalty: number },
-) => Promise<unknown>;
+type Ids = {
+  dims: number[];
+  slice: (...parts: Array<number | [number | null, number | null] | null>) => Ids;
+};
+
+type TinyPipe = {
+  tokenizer: {
+    (text: string, options: { add_special_tokens: boolean; padding: boolean; truncation: boolean }): {
+      input_ids: Ids;
+      attention_mask?: unknown;
+    };
+    apply_chat_template: (
+      messages: { role: string; content: string }[],
+      options: { tokenize: false; add_generation_prompt: boolean },
+    ) => string;
+    batch_decode: (ids: Ids, options: { skip_special_tokens: boolean }) => string[];
+  };
+  model: {
+    generate: (inputs: Record<string, unknown>) => Promise<Ids | { sequences: Ids }>;
+  };
+};
 
 type Progress = {
   status?: string;
@@ -28,23 +45,25 @@ type Progress = {
   total?: number;
 };
 
-let model: Gen | null = null;
-let loading: Promise<Gen> | null = null;
+let model: TinyPipe | null = null;
+let loading: Promise<TinyPipe> | null = null;
 
 export function tinyIsWarm(): boolean {
   return model != null;
 }
 
-function textOf(output: unknown): string {
-  const row = Array.isArray(output) ? output[0] : output;
-  if (!row || typeof row !== "object") return "";
-  const generated = (row as { generated_text?: unknown }).generated_text;
-  if (typeof generated === "string") return generated;
-  if (Array.isArray(generated)) {
-    const last = generated[generated.length - 1] as { content?: unknown } | undefined;
-    return typeof last?.content === "string" ? last.content : "";
-  }
-  return "";
+/** Keep only the new words. Special tokens are already gone in a normal decode. */
+export function completionFrom(full: string, prompt: string): string {
+  const bare = (value: string) => value.replace(/<\|im_start\|>/g, "").replace(/<\|im_end\|>/g, "").trim();
+  const decoded = bare(full);
+  const cue = bare(prompt);
+  if (!decoded || !cue || !decoded.startsWith(cue)) return "";
+  return decoded.slice(cue.length).trim();
+}
+
+function asIds(output: Ids | { sequences: Ids }): Ids {
+  if (output && typeof output === "object" && "sequences" in output) return output.sequences;
+  return output;
 }
 
 function readObject(text: string): Record<string, unknown> | null {
@@ -228,7 +247,7 @@ async function hasWebGpu(): Promise<boolean> {
   }
 }
 
-async function loadTiny(onStatus: (text: string) => void, device: "webgpu" | "wasm", dtype: "q4f16" | "q4"): Promise<Gen> {
+async function loadTiny(onStatus: (text: string) => void, device: "webgpu" | "wasm", dtype: "q4f16" | "q4"): Promise<TinyPipe> {
   const { pipeline, env } = await import("@huggingface/transformers");
   env.allowLocalModels = false;
   env.useBrowserCache = true;
@@ -253,7 +272,7 @@ async function loadTiny(onStatus: (text: string) => void, device: "webgpu" | "wa
       onStatus(`Loading the small model… ${pct}%. It stays cached in this browser.`);
     },
   });
-  return pipe as unknown as Gen;
+  return pipe as unknown as TinyPipe;
 }
 
 export function cpuFallbackAfterGpuError(error: unknown): boolean {
@@ -268,7 +287,7 @@ export function cpuFallbackAfterGpuError(error: unknown): boolean {
   return /webgpu|gpu|device|shader|adapter|out of memory|oom|f16/.test(message);
 }
 
-async function ensureTiny(onStatus: (text: string) => void): Promise<Gen> {
+async function ensureTiny(onStatus: (text: string) => void): Promise<TinyPipe> {
   if (model) {
     onStatus("Small model is already loaded in this tab.");
     return model;
@@ -300,14 +319,36 @@ const JSON_CUE = "Do not repeat the sample. JSON for the matter above. Start wit
 async function ask(system: string, user: string, tokens: number, onStatus: (text: string) => void): Promise<string> {
   const pipe = await ensureTiny(onStatus);
   const room = Math.max(0, 1800 - JSON_CUE.length - 1);
-  const output = await pipe(
+  const content = `${user.slice(0, room)}\n${JSON_CUE}`;
+  const prompt = pipe.tokenizer.apply_chat_template(
     [
       { role: "system", content: system },
-      { role: "user", content: `${user.slice(0, room)}\n${JSON_CUE}` },
+      { role: "user", content },
     ],
-    { max_new_tokens: tokens, do_sample: false, repetition_penalty: 1.05 },
+    { tokenize: false, add_generation_prompt: true },
   );
-  return textOf(output).slice(0, 1600);
+  const encoded = pipe.tokenizer(prompt, {
+    add_special_tokens: false,
+    padding: true,
+    truncation: true,
+  });
+  const promptLen = encoded.input_ids.dims.at(-1) ?? 0;
+  const sequences = asIds(
+    await pipe.model.generate({
+      ...encoded,
+      max_new_tokens: tokens,
+      do_sample: false,
+    }),
+  );
+  const seqLen = sequences.dims.at(-1) ?? 0;
+  const fresh = promptLen > 0 && promptLen < seqLen ? sequences.slice(null, [promptLen, null]) : sequences;
+  let text = pipe.tokenizer.batch_decode(fresh, { skip_special_tokens: true }).join("").trim();
+  if (!text) {
+    const whole = pipe.tokenizer.batch_decode(sequences, { skip_special_tokens: true }).join("");
+    text = completionFrom(whole, prompt);
+  }
+  if (!text) throw new Error("The model loaded but wrote nothing. Press Convene again.");
+  return text.slice(0, 1600);
 }
 
 export function parseGithub(raw: string): { owner: string; repo: string; path?: string } | null {
