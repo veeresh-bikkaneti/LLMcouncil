@@ -34,6 +34,12 @@ const PRESETS = [
   },
 ] as const;
 
+function say(value: string): string {
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!text || /[{}]|"stance"|"answer"|"verdict"|unstructured/i.test(text)) return "";
+  return text;
+}
+
 const ICONS = {
   lens: Eye,
   stacks: Library,
@@ -126,7 +132,7 @@ export function Chamber() {
         stopped: () => stopRef.current,
         onStatus: (text) => {
           setLive(text);
-          if (text.startsWith("The chair")) {
+          if (text.startsWith("Filing the ruling")) {
             setSession((current) => (current.phase === "done" ? current : { ...current, phase: "ruling" }));
           }
         },
@@ -491,15 +497,15 @@ function SeatCard({
         <p className="mt-4 text-sm text-accent">{brief.error}</p>
       ) : (
         <div className="mt-4 flex flex-1 flex-col gap-3">
-          {brief.stance && brief.stance !== brief.answer ? (
-            <p className="font-display text-base text-pretty text-fg italic">{brief.stance}</p>
+          {say(brief.stance) && say(brief.stance) !== say(brief.answer) ? (
+            <p className="font-display text-base text-pretty text-fg italic">{say(brief.stance)}</p>
           ) : null}
-          <p className="text-sm text-pretty text-fg">{brief.answer}</p>
-          {brief.claims.length > 0 ? (
+          <p className="text-sm text-pretty text-fg">{say(brief.answer) || "No sentence was filed."}</p>
+          {brief.claims.filter((claim) => say(claim)).length > 0 ? (
             <ol className="space-y-1.5 text-sm text-fg">
-              {brief.claims.map((claim) => (
+              {brief.claims.filter((claim) => say(claim)).map((claim) => (
                 <li key={claim} className="border-l border-accent pl-2">
-                  {claim}
+                  {say(claim)}
                 </li>
               ))}
             </ol>
@@ -555,7 +561,7 @@ function RulingSheet({
       {onRecord ? (
         <p className="mt-2 font-mono text-xs tracking-[0.14em] uppercase opacity-70">From the record</p>
       ) : null}
-      <p className="mt-4 text-pretty text-lg leading-relaxed">{ruling.verdict}</p>
+      <p className="mt-4 text-pretty text-lg leading-relaxed">{say(ruling.verdict) || "No sentence was filed."}</p>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-[9rem_minmax(0,1fr)]">
         <div>
@@ -580,29 +586,29 @@ function RulingSheet({
         </div>
       </div>
 
-      {ruling.actions.length > 0 ? (
+      {ruling.actions.filter((action) => say(action)).length > 0 ? (
         <ol className="mt-6 space-y-2">
-          {ruling.actions.map((action, index) => (
+          {ruling.actions.filter((action) => say(action)).map((action, index) => (
             <li key={action} className="flex gap-3 text-base">
               <span className="font-mono text-sm tabular-nums opacity-60">{index + 1}</span>
-              <span>{action}</span>
+              <span>{say(action)}</span>
             </li>
           ))}
         </ol>
       ) : null}
 
-      {ruling.dissent || ruling.openQuestions.length > 0 ? (
+      {say(ruling.dissent) || ruling.openQuestions.some((question) => say(question)) ? (
         <div className="mt-6 border-t border-ink/15 pt-4">
-          {ruling.dissent ? (
+          {say(ruling.dissent) ? (
             <>
               <p className="font-mono text-xs tracking-[0.14em] uppercase opacity-70">Dissent kept</p>
-              <p className="mt-2 text-pretty">{ruling.dissent}</p>
+              <p className="mt-2 text-pretty">{say(ruling.dissent)}</p>
             </>
           ) : null}
-          {ruling.openQuestions.length > 0 ? (
+          {ruling.openQuestions.some((question) => say(question)) ? (
             <ul className="mt-3 space-y-1 text-sm opacity-80">
-              {ruling.openQuestions.map((question) => (
-                <li key={question}>{question}</li>
+              {ruling.openQuestions.filter((question) => say(question)).map((question) => (
+                <li key={question}>{say(question)}</li>
               ))}
             </ul>
           ) : null}

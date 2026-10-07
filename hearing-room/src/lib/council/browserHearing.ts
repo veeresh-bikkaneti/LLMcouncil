@@ -176,6 +176,15 @@ function readable(value: string): string {
   return fieldString(text, "answer") || fieldString(text, "verdict") || fieldString(text, "stance") || plain(text);
 }
 
+function showWords(value: string): string {
+  const text = readable(value).replace(/\s+/g, " ").trim();
+  if (!text || /[{}]|"stance"|"answer"|"verdict"|unstructured/i.test(text)) {
+    const cleaned = plain(text);
+    return /[{}]/.test(cleaned) ? "" : cleaned;
+  }
+  return text;
+}
+
 function balancedEnd(text: string, start: number): number {
   let depth = 0;
   let inString = false;
@@ -482,9 +491,8 @@ async function ensureTiny(onStatus: (text: string) => void): Promise<TinyPipe> {
   return loading;
 }
 
-const SEAT_CUE = "Four short lines. No braces.\nSTANCE:\nANSWER:\nCLAIMS:\nCONFIDENCE:";
-const CROSS_CUE = "Three short lines. No braces.\nOBJECTION:\nAGREE:\nVOTE:";
-const CHAIR_CUE = "Four short lines. No braces.\nVERDICT:\nACTIONS:\nDISSENT:\nCONFIDENCE:";
+const SEAT_CUE = "One sentence. No labels.";
+const CROSS_CUE = "One sentence. Name the other seat, then the objection.";
 
 async function complete(pipe: TinyPipe, system: string, user: string, tokens: number, cue: string): Promise<string> {
   const room = Math.max(0, 1800 - cue.length - 1);
@@ -635,73 +643,100 @@ async function openPacket(question: string): Promise<Packet> {
 }
 
 const SEAT_SYSTEM: Record<SeatId, string> = {
-  lens: "You are Lens. Say what a person misreads. Short lines. No braces.",
-  stacks: "You are Stacks. Name the defect and the smallest fix. Short lines. No braces.",
-  pulse: "You are Pulse. Say who is blocked and how urgent. Short lines. No braces.",
+  lens: "You are Lens. One sentence: what a person misreads. Words only.",
+  stacks: "You are Stacks. One sentence: the defect and the smallest fix. Words only.",
+  pulse: "You are Pulse. One sentence: who is blocked, and how urgent. Words only.",
 };
 
 const CROSS_SYSTEM: Record<SeatId, string> = {
-  lens: "You are Lens. One objection. Vote lens, stacks, or pulse. No braces.",
-  stacks: "You are Stacks. One objection. Vote lens, stacks, or pulse. No braces.",
-  pulse: "You are Pulse. One objection. Vote lens, stacks, or pulse. No braces.",
+  lens: "You are Lens. One sentence objecting to another seat.",
+  stacks: "You are Stacks. One sentence objecting to another seat.",
+  pulse: "You are Pulse. One sentence objecting to another seat.",
 };
-
-const CHAIR_SYSTEM = "You are the Chair. Use only the filed claims. Short lines. No braces.";
 
 export function briefFrom(seatId: SeatId, text: string): Brief {
   const json = readObject(text);
-  if (!json) {
-    const answer = proseOutside(text) || plain(text);
+  const next = json ? clipField(json.nextStep, 160) : "";
+  const claims = (json ? asStrings(json.claims, 3, 160) : []).map(showWords).filter(Boolean);
+  if (next) {
+    const step = showWords(next);
+    if (step && !claims.includes(step)) claims.unshift(step);
+  }
+  const answer = showWords(
+    (json && (clipField(json.answer, 500) || clipField(json.stance, 500) || next)) || proseOutside(text) || plain(text),
+  );
+  if (!answer) {
     return {
       seatId,
-      status: answer ? "done" : "error",
+      status: "error",
       stance: "",
-      answer: answer || "",
+      answer: "",
       claims: [],
-      confidence: answer ? 40 : 0,
+      confidence: 0,
       unknowns: [],
       engine: "browser",
-      error: answer ? undefined : "The seat did not answer.",
+      error: "No sentence was filed.",
     };
   }
-  const next = clipField(json.nextStep, 160);
-  const claims = asStrings(json.claims, 3, 160);
-  if (next && !claims.includes(next)) claims.unshift(next);
-  const answer = readable(clipField(json.answer, 500) || next || proseOutside(text) || plain(text));
+  const stance = showWords(json ? clipField(json.stance, 220) : "");
   return {
     seatId,
     status: "done",
-    stance: readable(clipField(json.stance, 220)),
-    answer: answer || "No answer filed.",
+    stance: stance && stance !== answer ? stance : "",
+    answer,
     claims: claims.slice(0, 3),
-    confidence: asNumber(json.confidence),
-    unknowns: asStrings(json.unknowns, 2, 160),
+    confidence: json ? asNumber(json.confidence) : 40,
+    unknowns: json ? asStrings(json.unknowns, 2, 160).map(showWords).filter(Boolean) : [],
     engine: "browser",
   };
 }
 
 export function rulingFrom(text: string): Ruling {
   const json = readObject(text);
-  if (!json) {
-    const verdict = plain(text);
-    return {
-      verdict: verdict || "The chair did not file a verdict.",
-      actions: [],
-      dissent: "",
-      openQuestions: [],
-      chairConfidence: verdict ? 40 : 0,
-    };
-  }
-  const verdict = readable(
-    clipField(json.verdict, 600) || clipField(json.answer, 600) || clipField(json.stance, 600) || plain(text),
+  const verdict = showWords(
+    (json && (clipField(json.verdict, 600) || clipField(json.answer, 600) || clipField(json.stance, 600))) || plain(text),
   );
-  const dissent = readable(clipField(json.dissent, 300));
+  const dissent = showWords(json ? clipField(json.dissent, 300) : "");
   return {
-    verdict: verdict || "The chair did not file a verdict.",
-    actions: asStrings(json.actions, 3, 180),
-    dissent: /unstructured/i.test(dissent) ? "" : dissent,
-    openQuestions: asStrings(json.openQuestions, 2, 180),
-    chairConfidence: json.chairConfidence != null || json.confidence != null ? asNumber(json.chairConfidence ?? json.confidence) : 40,
+    verdict: verdict || "No sentence was filed.",
+    actions: (json ? asStrings(json.actions, 3, 180) : []).map(showWords).filter(Boolean),
+    dissent,
+    openQuestions: (json ? asStrings(json.openQuestions, 2, 180) : []).map(showWords).filter(Boolean),
+    chairConfidence: json && (json.chairConfidence != null || json.confidence != null) ? asNumber(json.chairConfidence ?? json.confidence) : verdict ? 40 : 0,
+  };
+}
+
+function share(left: string, right: string): number {
+  const words = (value: string) => new Set(value.toLowerCase().split(/\W+/).filter((word) => word.length > 3));
+  const a = words(left);
+  const b = words(right);
+  if (a.size === 0 || b.size === 0) return 0;
+  let same = 0;
+  for (const word of a) if (b.has(word)) same++;
+  return same / Math.min(a.size, b.size);
+}
+
+export function fileRuling(briefs: Brief[]): Ruling {
+  const done = briefs.filter((brief) => brief.status === "done" && showWords(brief.answer));
+  if (done.length === 0) {
+    return { verdict: "No seat filed a sentence.", actions: [], dissent: "", openQuestions: [], chairConfidence: 0 };
+  }
+  const lead = [...done].sort((a, b) => b.confidence - a.confidence)[0]!;
+  const actions = [
+    ...new Set(
+      done
+        .flatMap((brief) => brief.claims)
+        .map(showWords)
+        .filter((claim) => claim && claim !== lead.answer),
+    ),
+  ].slice(0, 3);
+  const other = done.find((brief) => brief.seatId !== lead.seatId && share(brief.answer, lead.answer) < 0.34);
+  return {
+    verdict: lead.answer,
+    actions,
+    dissent: other ? other.answer : "",
+    openQuestions: done.flatMap((brief) => brief.unknowns).map(showWords).filter(Boolean).slice(0, 2),
+    chairConfidence: lead.confidence,
   };
 }
 
@@ -811,29 +846,8 @@ export async function runBrowserHearing(opts: {
   }
 
   if (opts.stopped()) return { stopped: true };
-  opts.onStatus("The chair is writing the ruling…");
+  opts.onStatus("Filing the ruling…");
   const agreement = agreementScore(briefs, notes);
-  const filed = usable
-    .map((brief) => `${brief.seatId} (${brief.confidence}): ${brief.claims.join("; ") || brief.answer}`)
-    .join("\n");
-  let ruling: Ruling;
-  try {
-    const text = await ask(
-      CHAIR_SYSTEM,
-      `${matter.slice(0, 900)}\n\n${agreement === null ? "Agreement was not measured." : `Agreement ${agreement}%.`}\n${filed}`,
-      80,
-      opts.onStatus,
-      CHAIR_CUE,
-    );
-    ruling = rulingFrom(text);
-  } catch (error) {
-    ruling = {
-      verdict: errorText(error),
-      actions: ["Press Convene again."],
-      dissent: "",
-      openQuestions: [],
-      chairConfidence: 0,
-    };
-  }
+  const ruling = fileRuling(usable);
   return { stopped: false, packet, briefs, notes, ruling, agreement };
 }

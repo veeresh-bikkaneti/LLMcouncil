@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { briefFrom, completionFrom, cpuFallbackAfterGpuError, gpuWriteFailed, parseGithub, rulingFrom } from "./browserHearing.ts";
+import { briefFrom, completionFrom, cpuFallbackAfterGpuError, fileRuling, gpuWriteFailed, parseGithub, rulingFrom } from "./browserHearing.ts";
 
 describe("completionFrom", () => {
   it("drops the prompt and keeps the new JSON", () => {
@@ -138,6 +138,21 @@ describe("briefFrom", () => {
     assert.equal(brief.answer, "They cannot see the next step.");
     assert.deepEqual(brief.claims, ["The user is blocked", "Name the next step"]);
     assert.equal(brief.confidence, 40);
+  });
+});
+
+describe("fileRuling", () => {
+  it("files the hearing from seat sentences and drops braces", () => {
+    const stacks = briefFrom(
+      "stacks",
+      '{ "stance": "Null check is missing.", "answer": "Guard the empty list.", "next_step": "Add one guard."',
+    );
+    const pulse = briefFrom("pulse", "The user cannot see the next step.");
+    const ruling = fileRuling([stacks, pulse]);
+    assert.equal(ruling.verdict.includes("{"), false);
+    assert.equal(ruling.dissent.includes("{"), false);
+    assert.equal(ruling.verdict.includes("unstructured"), false);
+    assert.ok(ruling.verdict === "Guard the empty list." || ruling.verdict === "The user cannot see the next step.");
   });
 });
 
