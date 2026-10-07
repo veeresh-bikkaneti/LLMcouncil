@@ -13,7 +13,7 @@ import {
 } from "./protocol";
 
 const MODEL = "grok-4.5";
-const UNAVAILABLE = "The council has no model in this preview.";
+const UNAVAILABLE = "Grok is not available for this hearing.";
 
 type ToolCall = {
   id: string;
