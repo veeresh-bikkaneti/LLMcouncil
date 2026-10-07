@@ -186,7 +186,7 @@ export function Chamber() {
       setSession((current) => ({
         ...current,
         phase: "idle",
-        error: error instanceof Error ? error.message : "The hearing stopped.",
+        error: error instanceof Error ? error.message : String(error),
       }));
     }
   }

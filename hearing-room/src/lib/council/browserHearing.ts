@@ -15,25 +15,13 @@ import {
 
 const MODEL = "onnx-community/SmolLM2-360M-Instruct-ONNX";
 
-type Ids = {
-  dims: number[];
-  slice: (...parts: Array<number | [number | null, number | null] | null>) => Ids;
-};
-
 type TinyPipe = {
+  (text: string, options: { max_new_tokens: number; do_sample: false; return_full_text: true }): Promise<unknown>;
   tokenizer: {
-    (text: string, options: { add_special_tokens: boolean; padding: boolean; truncation: boolean }): {
-      input_ids: Ids;
-      attention_mask?: unknown;
-    };
     apply_chat_template: (
       messages: { role: string; content: string }[],
       options: { tokenize: false; add_generation_prompt: boolean },
     ) => string;
-    batch_decode: (ids: Ids, options: { skip_special_tokens: boolean }) => string[];
-  };
-  model: {
-    generate: (inputs: Record<string, unknown>) => Promise<Ids | { sequences: Ids }>;
   };
 };
 
@@ -47,23 +35,57 @@ type Progress = {
 
 let model: TinyPipe | null = null;
 let loading: Promise<TinyPipe> | null = null;
+let backend: "webgpu" | "wasm" = "wasm";
 
 export function tinyIsWarm(): boolean {
   return model != null;
 }
 
-/** Keep only the new words. Special tokens are already gone in a normal decode. */
+function errorText(error: unknown): string {
+  if (typeof error === "string" && error.trim()) return error.trim();
+  if (error instanceof Error && error.message.trim()) return error.message.trim();
+  if (error && typeof error === "object") {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message.trim();
+    const name = (error as { name?: unknown }).name;
+    if (typeof name === "string" && name.trim()) return name.trim();
+  }
+  return "The seat failed before it could write.";
+}
+
+function textOf(output: unknown): string {
+  if (typeof output === "string") return output.trim();
+  if (Array.isArray(output)) {
+    for (let i = output.length - 1; i >= 0; i--) {
+      const part = textOf(output[i]);
+      if (part) return part;
+    }
+    return "";
+  }
+  if (!output || typeof output !== "object") return "";
+  const row = output as { generated_text?: unknown; content?: unknown };
+  if (typeof row.content === "string" && row.content.trim()) return row.content.trim();
+  if ("generated_text" in row) return textOf(row.generated_text);
+  return "";
+}
+
+function replyFrom(full: string, prompt: string): string {
+  const cut = completionFrom(full, prompt);
+  if (cut) return cut;
+  const at = full.toLowerCase().lastIndexOf("assistant");
+  if (at >= 0) {
+    const tail = full.slice(at + "assistant".length).replace(/^[\s:]+/, "").trim();
+    if (tail && tail !== full.trim()) return tail;
+  }
+  return "";
+}
+
 export function completionFrom(full: string, prompt: string): string {
   const bare = (value: string) => value.replace(/<\|im_start\|>/g, "").replace(/<\|im_end\|>/g, "").trim();
   const decoded = bare(full);
   const cue = bare(prompt);
   if (!decoded || !cue || !decoded.startsWith(cue)) return "";
   return decoded.slice(cue.length).trim();
-}
-
-function asIds(output: Ids | { sequences: Ids }): Ids {
-  if (output && typeof output === "object" && "sequences" in output) return output.sequences;
-  return output;
 }
 
 function readObject(text: string): Record<string, unknown> | null {
@@ -237,11 +259,12 @@ function objectionsFrom(value: unknown, self: SeatId): { target: SeatId; point: 
   return out.slice(0, 2);
 }
 
-async function hasWebGpu(): Promise<boolean> {
-  const gpu = (navigator as Navigator & { gpu?: { requestAdapter: () => Promise<unknown> } }).gpu;
+async function hasShaderF16(): Promise<boolean> {
+  const gpu = (navigator as Navigator & { gpu?: { requestAdapter: () => Promise<{ features?: { has?: (name: string) => boolean } } | null> } }).gpu;
   if (!gpu || !("requestAdapter" in gpu)) return false;
   try {
-    return (await gpu.requestAdapter()) != null;
+    const adapter = await gpu.requestAdapter();
+    return adapter?.features?.has?.("shader-f16") === true;
   } catch {
     return false;
   }
@@ -251,8 +274,9 @@ async function loadTiny(onStatus: (text: string) => void, device: "webgpu" | "wa
   const { pipeline, env } = await import("@huggingface/transformers");
   env.allowLocalModels = false;
   env.useBrowserCache = true;
-  const wasm = env.backends.onnx.wasm as { numThreads?: number };
+  const wasm = env.backends.onnx.wasm as { numThreads?: number; wasmPaths?: string };
   wasm.numThreads = 1;
+  wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/";
   const pipe = await pipeline("text-generation", MODEL, {
     device,
     dtype,
@@ -280,7 +304,7 @@ async function loadTiny(onStatus: (text: string) => void, device: "webgpu" | "wa
 }
 
 export function cpuFallbackAfterGpuError(error: unknown): boolean {
-  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  const message = errorText(error).toLowerCase();
   if (
     /failed to fetch|networkerror|network error|load failed|failed to load resource|offline|timed out|timeout|404|403|enotfound/.test(
       message,
@@ -291,6 +315,17 @@ export function cpuFallbackAfterGpuError(error: unknown): boolean {
   return /webgpu|gpu|device|shader|adapter|out of memory|oom|f16/.test(message);
 }
 
+export function gpuWriteFailed(error: unknown): boolean {
+  const message = errorText(error).toLowerCase();
+  if (
+    /failed to fetch|networkerror|network error|load failed|offline|timed out|timeout|404|403|enotfound/.test(message)
+  ) {
+    return false;
+  }
+  if (message.includes("wrote nothing")) return false;
+  return true;
+}
+
 async function ensureTiny(onStatus: (text: string) => void): Promise<TinyPipe> {
   if (model) {
     onStatus("Small model is already loaded in this tab.");
@@ -298,12 +333,19 @@ async function ensureTiny(onStatus: (text: string) => void): Promise<TinyPipe> {
   }
   if (!loading) {
     loading = (async () => {
-      const gpu = await hasWebGpu();
+      const gpu = await hasShaderF16();
+      if (!gpu) {
+        backend = "wasm";
+        return await loadTiny(onStatus, "wasm", "q4");
+      }
       try {
-        return await loadTiny(onStatus, gpu ? "webgpu" : "wasm", gpu ? "q4f16" : "q4");
+        const pipe = await loadTiny(onStatus, "webgpu", "q4f16");
+        backend = "webgpu";
+        return pipe;
       } catch (error) {
-        if (!gpu || !cpuFallbackAfterGpuError(error)) throw error;
+        if (!cpuFallbackAfterGpuError(error)) throw error;
         onStatus("This GPU could not start the model. Loading the CPU copy…");
+        backend = "wasm";
         return await loadTiny(onStatus, "wasm", "q4");
       }
     })().then((pipe) => {
@@ -320,8 +362,7 @@ async function ensureTiny(onStatus: (text: string) => void): Promise<TinyPipe> {
 
 const JSON_CUE = "Do not repeat the sample. JSON for the matter above. Start with {";
 
-async function ask(system: string, user: string, tokens: number, onStatus: (text: string) => void): Promise<string> {
-  const pipe = await ensureTiny(onStatus);
+async function complete(pipe: TinyPipe, system: string, user: string, tokens: number): Promise<string> {
   const room = Math.max(0, 1800 - JSON_CUE.length - 1);
   const content = `${user.slice(0, room)}\n${JSON_CUE}`;
   const prompt = pipe.tokenizer.apply_chat_template(
@@ -331,30 +372,34 @@ async function ask(system: string, user: string, tokens: number, onStatus: (text
     ],
     { tokenize: false, add_generation_prompt: true },
   );
-  const encoded = pipe.tokenizer(prompt, {
-    add_special_tokens: false,
-    padding: true,
-    truncation: true,
-  });
-  const promptLen = encoded.input_ids.dims.at(-1) ?? 0;
-  const sequences = asIds(
-    await pipe.model.generate({
-      ...encoded,
-      max_new_tokens: tokens,
-      do_sample: false,
-    }),
-  );
-  const seqLen = sequences.dims.at(-1) ?? 0;
-  const fresh = promptLen > 0 && promptLen < seqLen ? sequences.slice(null, [promptLen, null]) : sequences;
-  let text = pipe.tokenizer.batch_decode(fresh, { skip_special_tokens: true }).join("").trim();
-  if (!text) {
-    const whole = pipe.tokenizer.batch_decode(sequences, { skip_special_tokens: true }).join("");
-    text = completionFrom(whole, prompt);
+  let output: unknown;
+  try {
+    output = await pipe(prompt, { max_new_tokens: tokens, do_sample: false, return_full_text: true });
+  } catch (error) {
+    throw new Error(errorText(error));
   }
-  if (!text) {
-    throw new Error(`The model loaded but wrote nothing (${promptLen} tokens in, ${seqLen} out). Press Convene again.`);
-  }
+  const full = textOf(output);
+  const text = replyFrom(full, prompt);
+  if (!text) throw new Error(`The model loaded but wrote nothing. Got: ${full.slice(0, 160) || "no text"}`);
   return text.slice(0, 1600);
+}
+
+async function ask(system: string, user: string, tokens: number, onStatus: (text: string) => void): Promise<string> {
+  const pipe = await ensureTiny(onStatus);
+  try {
+    return await complete(pipe, system, user, tokens);
+  } catch (error) {
+    if (backend !== "webgpu" || !gpuWriteFailed(error)) {
+      throw error instanceof Error ? error : new Error(errorText(error));
+    }
+    backend = "wasm";
+    model = null;
+    loading = null;
+    onStatus("This GPU could not write. Loading the CPU copy…");
+    const cpu = await loadTiny(onStatus, "wasm", "q4");
+    model = cpu;
+    return await complete(cpu, system, user, tokens);
+  }
 }
 
 export function parseGithub(raw: string): { owner: string; repo: string; path?: string } | null {
@@ -439,7 +484,7 @@ async function openPacket(question: string): Promise<Packet> {
   try {
     return await openGithub(repo.owner, repo.repo, repo.path);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "The repo did not open.";
+    const message = errorText(error);
     return { summary: message, sources: [], tools: [] };
   }
 }
@@ -495,7 +540,7 @@ export function briefFrom(seatId: SeatId, text: string): Brief {
 }
 
 function errorBrief(seatId: SeatId, error: unknown): Brief {
-  const message = error instanceof Error ? error.message : "The seat did not answer.";
+  const message = errorText(error);
   return {
     seatId,
     status: "error",
@@ -590,7 +635,7 @@ export async function runBrowserHearing(opts: {
           agreements: [],
           vote: brief.seatId,
           revisedConfidence: 0,
-          error: error instanceof Error ? error.message.slice(0, 200) : "Cross-exam failed.",
+          error: errorText(error).slice(0, 200),
         };
         notes.push(note);
         opts.onNote(note);
@@ -630,7 +675,7 @@ export async function runBrowserHearing(opts: {
         };
   } catch (error) {
     ruling = {
-      verdict: error instanceof Error ? error.message : "The chair did not answer.",
+      verdict: errorText(error),
       actions: ["Press Convene again."],
       dissent: "",
       openQuestions: [],
