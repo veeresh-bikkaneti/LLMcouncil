@@ -35,7 +35,7 @@ type Progress = {
 
 let model: TinyPipe | null = null;
 let loading: Promise<TinyPipe> | null = null;
-let backend: "webgpu" | "wasm" = "wasm";
+let retriedLoad = false;
 
 export function tinyIsWarm(): boolean {
   return model != null;
@@ -43,13 +43,24 @@ export function tinyIsWarm(): boolean {
 
 function errorText(error: unknown): string {
   if (typeof error === "string" && error.trim()) return error.trim();
+  if (typeof error === "number" || typeof error === "boolean" || typeof error === "bigint") {
+    return `The model stopped (${typeof error}: ${String(error)}).`;
+  }
   if (error instanceof Error && error.message.trim()) return error.message.trim();
   if (error && typeof error === "object") {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim()) return message.trim();
-    const name = (error as { name?: unknown }).name;
-    if (typeof name === "string" && name.trim()) return name.trim();
+    const row = error as { message?: unknown; name?: unknown; reason?: unknown };
+    if (typeof row.message === "string" && row.message.trim()) return row.message.trim();
+    const bits = [row.name, row.reason].filter((item) => typeof item === "string" && item.trim()) as string[];
+    if (bits.length > 0) return bits.join(": ");
+    try {
+      const dumped = JSON.stringify(error);
+      if (dumped && dumped !== "{}" && dumped !== "null") return `The model stopped: ${dumped.slice(0, 180)}`;
+    } catch {
+      // circular or unserializable
+    }
+    return `The model stopped (${Object.prototype.toString.call(error)}).`;
   }
+  if (error == null) return "The model stopped. No reason was given.";
   return "The seat failed before it could write.";
 }
 
@@ -259,27 +270,31 @@ function objectionsFrom(value: unknown, self: SeatId): { target: SeatId; point: 
   return out.slice(0, 2);
 }
 
-async function hasShaderF16(): Promise<boolean> {
-  const gpu = (navigator as Navigator & { gpu?: { requestAdapter: () => Promise<{ features?: { has?: (name: string) => boolean } } | null> } }).gpu;
-  if (!gpu || !("requestAdapter" in gpu)) return false;
+async function clearModelCache(): Promise<void> {
   try {
-    const adapter = await gpu.requestAdapter();
-    return adapter?.features?.has?.("shader-f16") === true;
+    if (typeof caches !== "undefined") await caches.delete("transformers-cache");
   } catch {
-    return false;
+    // the cache is optional
   }
 }
 
-async function loadTiny(onStatus: (text: string) => void, device: "webgpu" | "wasm", dtype: "q4f16" | "q4"): Promise<TinyPipe> {
+function blankFailure(error: unknown): boolean {
+  const message = errorText(error).toLowerCase();
+  if (/failed to fetch|networkerror|network error|offline|timed out|timeout|404|403|enotfound/.test(message)) return false;
+  return message.includes("no reason was given");
+}
+
+async function loadTiny(onStatus: (text: string) => void): Promise<TinyPipe> {
   const { pipeline, env } = await import("@huggingface/transformers");
   env.allowLocalModels = false;
   env.useBrowserCache = true;
-  const wasm = env.backends.onnx.wasm as { numThreads?: number; wasmPaths?: string };
+  const wasm = env.backends.onnx.wasm as { numThreads?: number; wasmPaths?: string; proxy?: boolean };
   wasm.numThreads = 1;
+  wasm.proxy = false;
   wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/";
   const pipe = await pipeline("text-generation", MODEL, {
-    device,
-    dtype,
+    device: "wasm",
+    dtype: "q4",
     progress_callback: (info: Progress) => {
       const file = info.file || info.name || "weights";
       if (info.status === "progress") {
@@ -300,7 +315,11 @@ async function loadTiny(onStatus: (text: string) => void, device: "webgpu" | "wa
       }
     },
   });
-  return pipe as unknown as TinyPipe;
+  const ready = pipe as unknown as TinyPipe;
+  if (typeof ready !== "function" || typeof ready.tokenizer?.apply_chat_template !== "function") {
+    throw new Error("The model file loaded, but the runtime did not start.");
+  }
+  return ready;
 }
 
 export function cpuFallbackAfterGpuError(error: unknown): boolean {
@@ -312,6 +331,7 @@ export function cpuFallbackAfterGpuError(error: unknown): boolean {
   ) {
     return false;
   }
+  if (message.includes("no reason was given")) return true;
   return /webgpu|gpu|device|shader|adapter|out of memory|oom|f16/.test(message);
 }
 
@@ -333,20 +353,14 @@ async function ensureTiny(onStatus: (text: string) => void): Promise<TinyPipe> {
   }
   if (!loading) {
     loading = (async () => {
-      const gpu = await hasShaderF16();
-      if (!gpu) {
-        backend = "wasm";
-        return await loadTiny(onStatus, "wasm", "q4");
-      }
       try {
-        const pipe = await loadTiny(onStatus, "webgpu", "q4f16");
-        backend = "webgpu";
-        return pipe;
+        return await loadTiny(onStatus);
       } catch (error) {
-        if (!cpuFallbackAfterGpuError(error)) throw error;
-        onStatus("This GPU could not start the model. Loading the CPU copy…");
-        backend = "wasm";
-        return await loadTiny(onStatus, "wasm", "q4");
+        if (retriedLoad || !blankFailure(error)) throw new Error(errorText(error));
+        retriedLoad = true;
+        onStatus("The saved copy looked broken. Downloading the model again…");
+        await clearModelCache();
+        return await loadTiny(onStatus);
       }
     })().then((pipe) => {
       model = pipe;
@@ -386,20 +400,7 @@ async function complete(pipe: TinyPipe, system: string, user: string, tokens: nu
 
 async function ask(system: string, user: string, tokens: number, onStatus: (text: string) => void): Promise<string> {
   const pipe = await ensureTiny(onStatus);
-  try {
-    return await complete(pipe, system, user, tokens);
-  } catch (error) {
-    if (backend !== "webgpu" || !gpuWriteFailed(error)) {
-      throw error instanceof Error ? error : new Error(errorText(error));
-    }
-    backend = "wasm";
-    model = null;
-    loading = null;
-    onStatus("This GPU could not write. Loading the CPU copy…");
-    const cpu = await loadTiny(onStatus, "wasm", "q4");
-    model = cpu;
-    return await complete(cpu, system, user, tokens);
-  }
+  return complete(pipe, system, user, tokens);
 }
 
 export function parseGithub(raw: string): { owner: string; repo: string; path?: string } | null {
