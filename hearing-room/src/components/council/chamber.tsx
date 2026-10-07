@@ -254,8 +254,8 @@ export function Chamber() {
           </p>
         </div>
         <Mascot
-          directions="/mascots/owl-directions.webp"
-          reactions="/mascots/owl-reactions.webp"
+          directions={`${import.meta.env.BASE_URL}mascots/owl-directions.webp`}
+          reactions={`${import.meta.env.BASE_URL}mascots/owl-reactions.webp`}
           size={168}
           label="Council clerk"
           className="shrink-0"

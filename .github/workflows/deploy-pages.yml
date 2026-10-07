@@ -1,11 +1,11 @@
-name: Deploy llmcouncil-web to GitHub Pages
+name: Deploy hearing room to GitHub Pages
 
 on:
   push:
     branches: [main]
     paths:
-      - 'llmcouncil-web/**'
-      - '.github/workflows/deploy-pages.yml'
+      - "hearing-room/**"
+      - ".github/workflows/deploy-pages.yml"
   workflow_dispatch: {}
 
 permissions:
@@ -27,19 +27,15 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: llmcouncil-web/package-lock.json
+          node-version: 22
 
       - name: Install dependencies
-        working-directory: llmcouncil-web
-        run: npm ci
+        working-directory: hearing-room
+        run: npm install
 
-      - name: Build (base path = /<repo>/ for project Pages)
-        working-directory: llmcouncil-web
-        run: npm run build -- --base=/${{ github.event.repository.name }}/
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      - name: Build the static hearing room
+        working-directory: hearing-room
+        run: npm run build:pages
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -47,7 +43,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: llmcouncil-web/dist
+          path: hearing-room/dist-pages
 
   deploy:
     needs: build
