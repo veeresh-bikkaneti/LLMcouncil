@@ -253,23 +253,27 @@ async function loadTiny(onStatus: (text: string) => void, device: "webgpu" | "wa
   env.useBrowserCache = true;
   const wasm = env.backends.onnx.wasm as { numThreads?: number };
   wasm.numThreads = 1;
-  const files = new Map<string, { loaded: number; total: number }>();
   const pipe = await pipeline("text-generation", MODEL, {
     device,
     dtype,
     progress_callback: (info: Progress) => {
-      if (info.status !== "progress") return;
-      const file = info.file || info.name;
-      if (!file || !info.total) return;
-      files.set(file, { loaded: info.loaded ?? 0, total: info.total });
-      let loaded = 0;
-      let total = 0;
-      for (const item of files.values()) {
-        loaded += item.loaded;
-        total += item.total;
+      const file = info.file || info.name || "weights";
+      if (info.status === "progress") {
+        const loaded = info.loaded ?? 0;
+        const total = info.total ?? 0;
+        if (total > 0) {
+          const pct = Math.min(100, Math.round((loaded / total) * 100));
+          onStatus(`Loading the small model… ${pct}%. It stays cached in this browser.`);
+          return;
+        }
+        if (loaded > 0) {
+          onStatus(`Loading the small model… ${Math.max(1, Math.round(loaded / 1_000_000))} MB so far. It stays cached in this browser.`);
+        }
+        return;
       }
-      const pct = total ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
-      onStatus(`Loading the small model… ${pct}%. It stays cached in this browser.`);
+      if (info.status === "initiate" || info.status === "download") {
+        onStatus(`Loading the small model… ${file}. It stays cached in this browser.`);
+      }
     },
   });
   return pipe as unknown as TinyPipe;
@@ -347,7 +351,9 @@ async function ask(system: string, user: string, tokens: number, onStatus: (text
     const whole = pipe.tokenizer.batch_decode(sequences, { skip_special_tokens: true }).join("");
     text = completionFrom(whole, prompt);
   }
-  if (!text) throw new Error("The model loaded but wrote nothing. Press Convene again.");
+  if (!text) {
+    throw new Error(`The model loaded but wrote nothing (${promptLen} tokens in, ${seqLen} out). Press Convene again.`);
+  }
   return text.slice(0, 1600);
 }
 
