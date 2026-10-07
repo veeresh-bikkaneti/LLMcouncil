@@ -250,7 +250,7 @@ export function Chamber() {
             Paste a GitHub link. No key. A small model runs in this browser.
           </p>
           <p className="mt-2 max-w-lg font-mono text-xs tracking-wide text-muted">
-            It loads the first time you convene, then stays cached and loaded while this tab is open.
+            First convene downloads the model once. This tab keeps it.
           </p>
         </div>
         <Mascot
