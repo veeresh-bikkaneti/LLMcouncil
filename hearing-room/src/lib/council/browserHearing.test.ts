@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { briefFrom, completionFrom, cpuFallbackAfterGpuError, parseGithub } from "./browserHearing.ts";
+import { briefFrom, completionFrom, cpuFallbackAfterGpuError, gpuWriteFailed, parseGithub } from "./browserHearing.ts";
 
 describe("completionFrom", () => {
   it("drops the prompt and keeps the new JSON", () => {
@@ -13,6 +13,12 @@ describe("completionFrom", () => {
     const prompt = "<|im_start|>user\nMatter<|im_end|>\n<|im_start|>assistant\n";
     assert.equal(completionFrom(prompt, prompt), "");
     assert.equal(completionFrom("system You are Lens.", "<|im_start|>system\nYou are Lens.<|im_end|>"), "");
+  });
+
+  it("keeps the reply when the decoder already stripped special tokens", () => {
+    const prompt = "<|im_start|>system\nYou are Lens.<|im_end|>\n<|im_start|>assistant\n";
+    const full = 'system\nYou are Lens.\nassistant\n{"answer":"Rename it."}';
+    assert.equal(completionFrom(full, prompt), '{"answer":"Rename it."}');
   });
 });
 
@@ -28,6 +34,18 @@ describe("cpuFallbackAfterGpuError", () => {
     assert.equal(cpuFallbackAfterGpuError(new Error("GPUPipelineError: shader-f16 is missing")), true);
     assert.equal(cpuFallbackAfterGpuError(new TypeError("requestDevice failed")), true);
     assert.equal(cpuFallbackAfterGpuError(new Error("out of memory")), true);
+  });
+});
+
+describe("gpuWriteFailed", () => {
+  it("does not download the CPU copy after a network miss", () => {
+    assert.equal(gpuWriteFailed("Failed to fetch"), false);
+    assert.equal(gpuWriteFailed(new Error("404")), false);
+  });
+
+  it("does download the CPU copy after a string abort", () => {
+    assert.equal(gpuWriteFailed("Aborted(RuntimeError: memory access out of bounds)"), true);
+    assert.equal(gpuWriteFailed({ message: "GPUPipelineError" }), true);
   });
 });
 
