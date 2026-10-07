@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { briefFrom, completionFrom, cpuFallbackAfterGpuError, gpuWriteFailed, parseGithub } from "./browserHearing.ts";
+import { briefFrom, completionFrom, cpuFallbackAfterGpuError, gpuWriteFailed, parseGithub, rulingFrom } from "./browserHearing.ts";
 
 describe("completionFrom", () => {
   it("drops the prompt and keeps the new JSON", () => {
@@ -115,6 +115,46 @@ describe("briefFrom", () => {
   it("keeps the prose when the only object is a repo snippet", () => {
     const brief = briefFrom("lens", 'A tired person will miss the button. {"name":"council"}');
     assert.equal(brief.answer, "A tired person will miss the button.");
-    assert.equal(brief.stance, "No stance filed.");
+    assert.equal(brief.stance, "");
+  });
+
+  it("reads a seat that stopped before the closing brace", () => {
+    const brief = briefFrom(
+      "stacks",
+      '{ "stance": "Null check is missing.", "answer": "Guard the empty list.", "next_step": "Add one guard."',
+    );
+    assert.equal(brief.stance, "Null check is missing.");
+    assert.equal(brief.answer, "Guard the empty list.");
+    assert.deepEqual(brief.claims, ["Add one guard."]);
+    assert.equal(brief.answer.includes("{"), false);
+  });
+
+  it("reads four short lines when the model skips braces", () => {
+    const brief = briefFrom(
+      "pulse",
+      "STANCE: The user is stuck.\nANSWER: They cannot see the next step.\nCLAIMS: The user is blocked | Name the next step\nCONFIDENCE: 40",
+    );
+    assert.equal(brief.stance, "The user is stuck.");
+    assert.equal(brief.answer, "They cannot see the next step.");
+    assert.deepEqual(brief.claims, ["The user is blocked", "Name the next step"]);
+    assert.equal(brief.confidence, 40);
+  });
+});
+
+describe("rulingFrom", () => {
+  it("uses the answer when the chair writes a broken seat object", () => {
+    const ruling = rulingFrom(
+      '{ "stance": "Null check is missing.", "answer": "Guard the empty list.", "next_step": "Add one guard."',
+    );
+    assert.equal(ruling.verdict, "Guard the empty list.");
+    assert.equal(ruling.dissent, "");
+    assert.equal(ruling.verdict.includes("{"), false);
+  });
+
+  it("reads a verdict written as short lines", () => {
+    const ruling = rulingFrom("VERDICT: Rename the control.\nACTIONS: Add an empty state | Retest the button\nDISSENT: Stacks wanted a code fix.");
+    assert.equal(ruling.verdict, "Rename the control.");
+    assert.deepEqual(ruling.actions, ["Add an empty state", "Retest the button"]);
+    assert.equal(ruling.dissent, "Stacks wanted a code fix.");
   });
 });
