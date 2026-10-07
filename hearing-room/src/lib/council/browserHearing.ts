@@ -1,3 +1,4 @@
+import type { Wllama } from "@wllama/wllama";
 import {
   type Brief,
   type CrossNote,
@@ -13,22 +14,12 @@ import {
   seatById,
 } from "./protocol.ts";
 
-const MODEL = "onnx-community/SmolLM2-360M-Instruct-ONNX";
+const MODEL_REPO = "bartowski/SmolLM2-135M-Instruct-GGUF";
+const MODEL_FILE = "SmolLM2-135M-Instruct-Q4_K_M.gguf";
 
-type TinyPipe = {
-  (text: string, options: { max_new_tokens: number; do_sample: false; return_full_text: true }): Promise<unknown>;
-  tokenizer: {
-    apply_chat_template: (
-      messages: { role: string; content: string }[],
-      options: { tokenize: false; add_generation_prompt: boolean },
-    ) => string;
-  };
-};
+type TinyPipe = Wllama;
 
 type Progress = {
-  status?: string;
-  file?: string;
-  name?: string;
   loaded?: number;
   total?: number;
 };
@@ -62,33 +53,6 @@ function errorText(error: unknown): string {
   }
   if (error == null) return "The model stopped. No reason was given.";
   return "The seat failed before it could write.";
-}
-
-function textOf(output: unknown): string {
-  if (typeof output === "string") return output.trim();
-  if (Array.isArray(output)) {
-    for (let i = output.length - 1; i >= 0; i--) {
-      const part = textOf(output[i]);
-      if (part) return part;
-    }
-    return "";
-  }
-  if (!output || typeof output !== "object") return "";
-  const row = output as { generated_text?: unknown; content?: unknown };
-  if (typeof row.content === "string" && row.content.trim()) return row.content.trim();
-  if ("generated_text" in row) return textOf(row.generated_text);
-  return "";
-}
-
-function replyFrom(full: string, prompt: string): string {
-  const cut = completionFrom(full, prompt);
-  if (cut) return cut;
-  const at = full.toLowerCase().lastIndexOf("assistant");
-  if (at >= 0) {
-    const tail = full.slice(at + "assistant".length).replace(/^[\s:]+/, "").trim();
-    if (tail && tail !== full.trim()) return tail;
-  }
-  return "";
 }
 
 export function completionFrom(full: string, prompt: string): string {
@@ -272,54 +236,53 @@ function objectionsFrom(value: unknown, self: SeatId): { target: SeatId; point: 
 
 async function clearModelCache(): Promise<void> {
   try {
-    if (typeof caches !== "undefined") await caches.delete("transformers-cache");
+    if (typeof caches === "undefined") return;
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((key) => /wllama|transformers/i.test(key)).map((key) => caches.delete(key)));
   } catch {
     // the cache is optional
   }
 }
 
-function blankFailure(error: unknown): boolean {
-  const message = errorText(error).toLowerCase();
-  if (/failed to fetch|networkerror|network error|offline|timed out|timeout|404|403|enotfound/.test(message)) return false;
-  return message.includes("no reason was given");
+function reportDownload(info: Progress, onStatus: (text: string) => void) {
+  const loaded = info.loaded ?? 0;
+  const total = info.total ?? 0;
+  if (total > 0) {
+    const pct = Math.min(100, Math.round((loaded / total) * 100));
+    onStatus(`Downloading the free model… ${pct}%. About 105 MB, once. This browser keeps it.`);
+    return;
+  }
+  if (loaded > 0) {
+    onStatus(`Downloading the free model… ${Math.max(1, Math.round(loaded / 1_000_000))} MB. This browser keeps it.`);
+  }
 }
 
-async function loadTiny(onStatus: (text: string) => void): Promise<TinyPipe> {
-  const { pipeline, env } = await import("@huggingface/transformers");
-  env.allowLocalModels = false;
-  env.useBrowserCache = true;
-  const wasm = env.backends.onnx.wasm as { numThreads?: number; wasmPaths?: string; proxy?: boolean };
-  wasm.numThreads = 1;
-  wasm.proxy = false;
-  wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/";
-  const pipe = await pipeline("text-generation", MODEL, {
-    device: "wasm",
-    dtype: "q4",
-    progress_callback: (info: Progress) => {
-      const file = info.file || info.name || "weights";
-      if (info.status === "progress") {
-        const loaded = info.loaded ?? 0;
-        const total = info.total ?? 0;
-        if (total > 0) {
-          const pct = Math.min(100, Math.round((loaded / total) * 100));
-          onStatus(`Loading the small model… ${pct}%. It stays cached in this browser.`);
-          return;
-        }
-        if (loaded > 0) {
-          onStatus(`Loading the small model… ${Math.max(1, Math.round(loaded / 1_000_000))} MB so far. It stays cached in this browser.`);
-        }
-        return;
-      }
-      if (info.status === "initiate" || info.status === "download") {
-        onStatus(`Loading the small model… ${file}. It stays cached in this browser.`);
-      }
+async function loadTiny(onStatus: (text: string) => void, useCache: boolean): Promise<TinyPipe> {
+  const { Wllama } = await import("@wllama/wllama");
+  const wasmUrl = (await import("./wllamaWasm.ts")).default;
+  const href = new URL(wasmUrl, window.location.href).href;
+  const engine = new Wllama(
+    { default: href },
+    { suppressNativeLog: true, allowOffline: useCache },
+  );
+  onStatus("Downloading the free model… About 105 MB, once. This browser keeps it.");
+  await engine.loadModelFromHF(
+    { repo: MODEL_REPO, file: MODEL_FILE },
+    {
+      n_ctx: 1024,
+      n_batch: 128,
+      n_ubatch: 128,
+      n_threads: 1,
+      n_gpu_layers: 0,
+      cache_type_k: "q8_0",
+      cache_type_v: "q8_0",
+      warmup: false,
+      useCache,
+      progressCallback: (info) => reportDownload(info, onStatus),
     },
-  });
-  const ready = pipe as unknown as TinyPipe;
-  if (typeof ready !== "function" || typeof ready.tokenizer?.apply_chat_template !== "function") {
-    throw new Error("The model file loaded, but the runtime did not start.");
-  }
-  return ready;
+  );
+  if (!engine.isModelLoaded()) throw new Error("The model file loaded, but the runtime did not start.");
+  return engine;
 }
 
 export function cpuFallbackAfterGpuError(error: unknown): boolean {
@@ -346,21 +309,24 @@ export function gpuWriteFailed(error: unknown): boolean {
   return true;
 }
 
+function blankFailure(error: unknown): boolean {
+  const message = errorText(error).toLowerCase();
+  if (/failed to fetch|networkerror|network error|offline|timed out|timeout|404|403|enotfound/.test(message)) return false;
+  return message.includes("no reason was given");
+}
+
 async function ensureTiny(onStatus: (text: string) => void): Promise<TinyPipe> {
-  if (model) {
-    onStatus("Small model is already loaded in this tab.");
-    return model;
-  }
+  if (model) return model;
   if (!loading) {
     loading = (async () => {
       try {
-        return await loadTiny(onStatus);
+        return await loadTiny(onStatus, true);
       } catch (error) {
         if (retriedLoad || !blankFailure(error)) throw new Error(errorText(error));
         retriedLoad = true;
-        onStatus("The saved copy looked broken. Downloading the model again…");
+        onStatus("The saved copy looked broken. Downloading the free model again…");
         await clearModelCache();
-        return await loadTiny(onStatus);
+        return await loadTiny(onStatus, false);
       }
     })().then((pipe) => {
       model = pipe;
@@ -379,22 +345,22 @@ const JSON_CUE = "Do not repeat the sample. JSON for the matter above. Start wit
 async function complete(pipe: TinyPipe, system: string, user: string, tokens: number): Promise<string> {
   const room = Math.max(0, 1800 - JSON_CUE.length - 1);
   const content = `${user.slice(0, room)}\n${JSON_CUE}`;
-  const prompt = pipe.tokenizer.apply_chat_template(
-    [
-      { role: "system", content: system },
-      { role: "user", content },
-    ],
-    { tokenize: false, add_generation_prompt: true },
-  );
-  let output: unknown;
+  let text = "";
   try {
-    output = await pipe(prompt, { max_new_tokens: tokens, do_sample: false, return_full_text: true });
+    const response = await pipe.createChatCompletion({
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content },
+      ],
+      max_tokens: tokens,
+      temperature: 0,
+      top_k: 1,
+    });
+    text = (response.choices[0]?.message.content ?? "").trim();
   } catch (error) {
     throw new Error(errorText(error));
   }
-  const full = textOf(output);
-  const text = replyFrom(full, prompt);
-  if (!text) throw new Error(`The model loaded but wrote nothing. Got: ${full.slice(0, 160) || "no text"}`);
+  if (!text) throw new Error("The model loaded but wrote nothing.");
   return text.slice(0, 1600);
 }
 
@@ -471,22 +437,50 @@ async function openGithub(owner: string, repo: string, path?: string): Promise<P
   };
 }
 
+async function openWeb(question: string): Promise<Packet> {
+  const q = question.replace(/\s+/g, " ").trim().slice(0, 160);
+  const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(q)}&utf8=1&format=json&origin=*&srlimit=1`;
+  const searchRes = await fetch(searchUrl, { signal: AbortSignal.timeout(8_000) });
+  if (!searchRes.ok) {
+    return { summary: `Lookup returned ${searchRes.status}.`, sources: [], tools: [{ name: "web_search", detail: "wikipedia" }] };
+  }
+  const search = (await searchRes.json()) as { query?: { search?: { title?: string; snippet?: string }[] } };
+  const hit = search.query?.search?.[0];
+  if (!hit?.title) {
+    return { summary: "No public page matched that question.", sources: [], tools: [{ name: "web_search", detail: q }] };
+  }
+  const pageUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1&redirects=1&titles=${encodeURIComponent(hit.title)}&format=json&origin=*`;
+  const pageRes = await fetch(pageUrl, { signal: AbortSignal.timeout(8_000) });
+  let extract = (hit.snippet ?? "").replace(/<[^>]+>/g, "");
+  if (pageRes.ok) {
+    const page = (await pageRes.json()) as { query?: { pages?: Record<string, { extract?: string }> } };
+    const first = Object.values(page.query?.pages ?? {})[0];
+    if (first?.extract) extract = first.extract;
+  }
+  const slug = encodeURIComponent(hit.title.replace(/ /g, "_"));
+  return {
+    summary: extract.slice(0, 1400) || "The page had no readable text.",
+    sources: [{ title: hit.title, url: `https://en.wikipedia.org/wiki/${slug}` }],
+    tools: [{ name: "web_search", detail: hit.title }],
+  };
+}
+
 async function openPacket(question: string): Promise<Packet> {
   const link = linksIn(question)[0];
-  if (!link) return { summary: "", sources: [], tools: [] };
-  const repo = parseGithub(link);
-  if (!repo) {
-    return {
-      summary: "Only a public GitHub link is opened in the browser. Other sites stay closed.",
-      sources: [],
-      tools: [],
-    };
+  if (link) {
+    const repo = parseGithub(link);
+    if (repo) {
+      try {
+        return await openGithub(repo.owner, repo.repo, repo.path);
+      } catch (error) {
+        return { summary: errorText(error), sources: [], tools: [] };
+      }
+    }
   }
   try {
-    return await openGithub(repo.owner, repo.repo, repo.path);
+    return await openWeb(question);
   } catch (error) {
-    const message = errorText(error);
-    return { summary: message, sources: [], tools: [] };
+    return { summary: errorText(error), sources: [], tools: [] };
   }
 }
 

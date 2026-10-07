@@ -10,15 +10,10 @@ Paste a public GitHub URL. Press Convene. No API key. No clone. No laptop setup.
 
 ## Model
 
-One model: `onnx-community/SmolLM2-360M-Instruct-ONNX`.
+One free model, no key and no account: `bartowski/SmolLM2-135M-Instruct-GGUF` file `SmolLM2-135M-Instruct-Q4_K_M.gguf` (about 105 MB).
 
-| Path | Weights | Tokenizer |
-| --- | ---: | ---: |
-| WebGPU, when the browser can start an adapter | 272,353,302 bytes (`q4f16`) | 3,522,656 bytes |
-| CPU / WASM, one thread | 386,495,938 bytes (`q4`) | same tokenizer |
+It runs on one CPU thread beside the page. GitHub Pages cannot turn on shared memory, so the GPU copy is not used. The first Convene downloads it once. Later visits in that browser reuse the cache. It stays loaded until the tab closes.
 
-A failed download does not start the second file. A GPU device failure may fall back to the CPU file. Seats, cross-exam, and the chair share that one session, one after another.
-
-The repo text is read in the browser from the public GitHub API. Other websites are not opened. Agreement is computed from the claims, not from how many seats returned.
+A public GitHub link is read from the GitHub API. A question with no link is looked up on Wikipedia. Agreement is computed from the claims, not from how many seats returned.
 
 The VS Code extension, the Chrome extension, and `llmcouncil-web` are separate and were not replaced.

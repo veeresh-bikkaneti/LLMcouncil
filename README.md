@@ -4,7 +4,7 @@
 
 The live page is https://veeresh-bikkaneti.github.io/LLMcouncil/ .
 
-The page in [hearing-room](hearing-room/) takes a public GitHub URL and runs the council in the browser. SmolLM2-360M loads on the first Convene, stays cached, and stays in memory while the tab is open. This extension, the Chrome extension, and `llmcouncil-web` are unchanged.
+The page in [hearing-room](hearing-room/) takes a public GitHub URL and runs the council in the browser. No key and no account. SmolLM2-135M (about 105 MB) loads on the first Convene, stays cached, and stays in memory while the tab is open. This extension, the Chrome extension, and `llmcouncil-web` are unchanged.
 
 Multi-agent AI analysis system that brings collaborative intelligence to your VS Code editor.
 
