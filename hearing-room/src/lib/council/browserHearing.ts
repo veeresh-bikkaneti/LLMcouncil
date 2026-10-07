@@ -68,12 +68,112 @@ function readObject(text: string): Record<string, unknown> | null {
   for (let i = 0; i < text.length; i++) {
     if (text[i] !== "{") continue;
     const end = balancedEnd(text, i);
-    if (end < 0) continue;
-    const parsed = parseLoose(text.slice(i, end + 1));
-    if (parsed) last = normalizeKeys(parsed);
+    const slice = end >= 0 ? text.slice(i, end + 1) : text.slice(i);
+    const parsed = parseLoose(slice);
+    if (parsed && usefulRecord(parsed)) last = normalizeKeys(parsed);
+    if (end < 0) break;
     i = end;
   }
-  return last;
+  return last ?? salvageFields(text);
+}
+
+function usefulRecord(value: Record<string, unknown>): boolean {
+  const row = normalizeKeys(value);
+  return ["answer", "stance", "claims", "verdict", "actions", "dissent", "openQuestions", "objections", "nextStep"].some(
+    (key) => {
+      const item = row[key];
+      if (typeof item === "string") return item.trim().length > 0;
+      return Array.isArray(item) && item.length > 0;
+    },
+  );
+}
+
+function fieldString(text: string, key: string): string {
+  const keyRe = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = text.match(new RegExp(`["']${keyRe}["']\\s*:\\s*["']([^"'\\n]*)`, "i"));
+  return match?.[1] ? clip(match[1], 500) : "";
+}
+
+function lineField(text: string, key: string): string {
+  const keyRe = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = text.match(new RegExp(`(?:^|\\n)\\s*${keyRe}\\s*[:=]\\s*([^\\n{]+)`, "i"));
+  if (!match?.[1]) return "";
+  const value = match[1].replace(/^["'\s]+|["',\s]+$/g, "");
+  if (!value || value.includes("{")) return "";
+  return clip(value, 500);
+}
+
+function pick(text: string, key: string): string {
+  return fieldString(text, key) || lineField(text, key);
+}
+
+function fieldList(text: string, key: string): string[] {
+  const keyRe = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const bracket = text.match(new RegExp(`["']?${keyRe}["']?\\s*[:=]\\s*\\[([^\\]]*)`, "i"));
+  if (bracket?.[1]) {
+    const items = [...bracket[1].matchAll(/["']([^"']+)["']/g)].map((item) => clip(item[1], 160)).filter(Boolean);
+    if (items.length > 0) return items.slice(0, 3);
+  }
+  const line = pick(text, key);
+  if (!line) return [];
+  return line
+    .split(/\s*[|;]\s*/)
+    .map((item) => clip(item, 160))
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function salvageFields(text: string): Record<string, unknown> | null {
+  const stance = pick(text, "stance");
+  const answer = pick(text, "answer");
+  const verdict = pick(text, "verdict");
+  const dissent = pick(text, "dissent");
+  const next = pick(text, "next_step");
+  const claims = fieldList(text, "claims");
+  const actions = fieldList(text, "actions");
+  const objection = pick(text, "objection");
+  const vote = pick(text, "vote");
+  const confidence = pick(text, "confidence");
+  const agreements = fieldList(text, "agree");
+  if (!stance && !answer && !verdict && !dissent && !next && !objection && !vote && claims.length === 0 && actions.length === 0) {
+    return null;
+  }
+  const row: Record<string, unknown> = {};
+  if (stance) row.stance = stance;
+  if (answer) row.answer = answer;
+  if (verdict) row.verdict = verdict;
+  if (dissent && !/unstructured/i.test(dissent)) row.dissent = dissent;
+  if (next) row.nextStep = next;
+  if (claims.length > 0) row.claims = claims;
+  if (actions.length > 0) row.actions = actions;
+  if (objection) row.objections = [objection];
+  if (vote) row.vote = vote;
+  if (confidence) row.confidence = confidence;
+  if (agreements.length > 0) row.agreements = agreements;
+  return row;
+}
+
+function plain(text: string): string {
+  return clip(
+    text
+      .replace(/```json|```/gi, " ")
+      .replace(/[{}[\]"]/g, " ")
+      .replace(
+        /\b(stance|answer|claims|confidence|unknowns|verdict|actions|dissent|next_step|openQuestions|chairConfidence)\b\s*:/gi,
+        " ",
+      )
+      .replace(/\s+/g, " "),
+    500,
+  );
+}
+
+function readable(value: string): string {
+  const text = value.trim();
+  if (!text) return "";
+  if (!text.includes("{") && !/"answer"\s*:/.test(text) && !/"stance"\s*:/.test(text) && !/"verdict"\s*:/.test(text)) {
+    return text;
+  }
+  return fieldString(text, "answer") || fieldString(text, "verdict") || fieldString(text, "stance") || plain(text);
 }
 
 function balancedEnd(text: string, start: number): number {
@@ -107,15 +207,56 @@ function balancedEnd(text: string, start: number): number {
   return -1;
 }
 
+function closeJson(slice: string): string {
+  let out = slice.trim().replace(/,\s*$/, "");
+  let inString = false;
+  let escape = false;
+  let braces = 0;
+  let brackets = 0;
+  for (const ch of out) {
+    if (inString) {
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") braces++;
+    else if (ch === "}") braces = Math.max(0, braces - 1);
+    else if (ch === "[") brackets++;
+    else if (ch === "]") brackets = Math.max(0, brackets - 1);
+  }
+  if (inString) out += '"';
+  while (brackets > 0) {
+    out += "]";
+    brackets--;
+  }
+  while (braces > 0) {
+    out += "}";
+    braces--;
+  }
+  return out;
+}
+
 function parseLoose(slice: string): Record<string, unknown> | null {
-  const attempts = [slice, slice.replace(/,\s*([}\]])/g, "$1")];
+  const closed = closeJson(slice);
+  const attempts = [slice, closed, closed.replace(/,\s*([}\]])/g, "$1"), slice.replace(/,\s*([}\]])/g, "$1")];
+  const seen = new Set<string>();
   for (const candidate of attempts) {
+    if (seen.has(candidate)) continue;
+    seen.add(candidate);
     try {
       const value = JSON.parse(candidate) as unknown;
       if (!value || typeof value !== "object" || Array.isArray(value)) continue;
       return value as Record<string, unknown>;
     } catch {
-      // try the trailing-comma repair next
+      // try the closed or trailing-comma form next
     }
   }
   return null;
@@ -140,7 +281,8 @@ const KEY_ALIAS: Record<string, string> = {
   revisedconfidence: "revisedConfidence",
   revised_confidence: "revisedConfidence",
   target: "target",
-  point: "point",
+  next_step: "nextStep",
+  nextstep: "nextStep",
 };
 
 function normalizeKeys(value: Record<string, unknown>): Record<string, unknown> {
@@ -340,11 +482,13 @@ async function ensureTiny(onStatus: (text: string) => void): Promise<TinyPipe> {
   return loading;
 }
 
-const JSON_CUE = "Do not repeat the sample. JSON for the matter above. Start with {";
+const SEAT_CUE = "Four short lines. No braces.\nSTANCE:\nANSWER:\nCLAIMS:\nCONFIDENCE:";
+const CROSS_CUE = "Three short lines. No braces.\nOBJECTION:\nAGREE:\nVOTE:";
+const CHAIR_CUE = "Four short lines. No braces.\nVERDICT:\nACTIONS:\nDISSENT:\nCONFIDENCE:";
 
-async function complete(pipe: TinyPipe, system: string, user: string, tokens: number): Promise<string> {
-  const room = Math.max(0, 1800 - JSON_CUE.length - 1);
-  const content = `${user.slice(0, room)}\n${JSON_CUE}`;
+async function complete(pipe: TinyPipe, system: string, user: string, tokens: number, cue: string): Promise<string> {
+  const room = Math.max(0, 1800 - cue.length - 1);
+  const content = `${user.slice(0, room)}\n${cue}`;
   let text = "";
   try {
     const response = await pipe.createChatCompletion({
@@ -364,9 +508,15 @@ async function complete(pipe: TinyPipe, system: string, user: string, tokens: nu
   return text.slice(0, 1600);
 }
 
-async function ask(system: string, user: string, tokens: number, onStatus: (text: string) => void): Promise<string> {
+async function ask(
+  system: string,
+  user: string,
+  tokens: number,
+  onStatus: (text: string) => void,
+  cue: string,
+): Promise<string> {
   const pipe = await ensureTiny(onStatus);
-  return complete(pipe, system, user, tokens);
+  return complete(pipe, system, user, tokens, cue);
 }
 
 export function parseGithub(raw: string): { owner: string; repo: string; path?: string } | null {
@@ -485,52 +635,73 @@ async function openPacket(question: string): Promise<Packet> {
 }
 
 const SEAT_SYSTEM: Record<SeatId, string> = {
-  lens: `You are Lens. What a person misreads. JSON only. No markdown. Each string under 8 words.
-{"stance":"Button looks like a title.","answer":"A tired person will not tap it.","claims":["Label is a heading.","No empty state.","Next step is hidden."],"confidence":55,"unknowns":["Which screen."]}`,
-  stacks: `You are Stacks. The defect and the smallest fix. JSON only. No markdown. Each string under 8 words.
-{"stance":"Null check is missing.","answer":"Guard the empty list.","claims":["Empty list crashes the loop.","Add one guard.","Retest the empty path."],"confidence":55,"unknowns":["Which function."]}`,
-  pulse: `You are Pulse. Who is blocked and how urgent. JSON only. No markdown. Each string under 8 words.
-{"stance":"The user is stuck.","answer":"They cannot see the next step.","claims":["The user is blocked.","It feels urgent.","Name the next step."],"confidence":55,"unknowns":["Who is blocked."]}`,
+  lens: "You are Lens. Say what a person misreads. Short lines. No braces.",
+  stacks: "You are Stacks. Name the defect and the smallest fix. Short lines. No braces.",
+  pulse: "You are Pulse. Say who is blocked and how urgent. Short lines. No braces.",
 };
 
 const CROSS_SYSTEM: Record<SeatId, string> = {
-  lens: `You are Lens. JSON only. No markdown. One objection. target and vote are lens, stacks, or pulse.
-{"objections":[{"target":"stacks","point":"No defect shown."}],"agreements":["User is blocked."],"vote":"lens","revisedConfidence":50}`,
-  stacks: `You are Stacks. JSON only. No markdown. One objection. target and vote are lens, stacks, or pulse.
-{"objections":[{"target":"lens","point":"No misread is shown."}],"agreements":["A fix is named."],"vote":"stacks","revisedConfidence":50}`,
-  pulse: `You are Pulse. JSON only. No markdown. One objection. target and vote are lens, stacks, or pulse.
-{"objections":[{"target":"stacks","point":"A defect is not who is stuck."}],"agreements":["The user is blocked."],"vote":"pulse","revisedConfidence":50}`,
+  lens: "You are Lens. One objection. Vote lens, stacks, or pulse. No braces.",
+  stacks: "You are Stacks. One objection. Vote lens, stacks, or pulse. No braces.",
+  pulse: "You are Pulse. One objection. Vote lens, stacks, or pulse. No braces.",
 };
 
-const CHAIR_SYSTEM = `You are the Chair. Use only the filed claims. JSON only. No markdown. Each string under 8 words.
-{"verdict":"The label blocks the user.","actions":["Rename the control.","Add an empty state."],"dissent":"Stacks wanted a code fix.","openQuestions":["Which screen."],"chairConfidence":55}`;
+const CHAIR_SYSTEM = "You are the Chair. Use only the filed claims. Short lines. No braces.";
 
 export function briefFrom(seatId: SeatId, text: string): Brief {
   const json = readObject(text);
   if (!json) {
-    const answer = proseOutside(text) || clip(text, 700);
+    const answer = proseOutside(text) || plain(text);
     return {
       seatId,
       status: answer ? "done" : "error",
-      stance: answer ? "Unstructured brief." : "",
+      stance: "",
       answer: answer || "",
       claims: [],
       confidence: answer ? 40 : 0,
-      unknowns: answer ? ["Brief was not valid JSON."] : [],
+      unknowns: [],
       engine: "browser",
       error: answer ? undefined : "The seat did not answer.",
     };
   }
-  const answer = clipField(json.answer, 500) || proseOutside(text) || "No answer filed.";
+  const next = clipField(json.nextStep, 160);
+  const claims = asStrings(json.claims, 3, 160);
+  if (next && !claims.includes(next)) claims.unshift(next);
+  const answer = readable(clipField(json.answer, 500) || next || proseOutside(text) || plain(text));
   return {
     seatId,
     status: "done",
-    stance: clipField(json.stance, 220) || "No stance filed.",
-    answer,
-    claims: asStrings(json.claims, 3, 160),
+    stance: readable(clipField(json.stance, 220)),
+    answer: answer || "No answer filed.",
+    claims: claims.slice(0, 3),
     confidence: asNumber(json.confidence),
     unknowns: asStrings(json.unknowns, 2, 160),
     engine: "browser",
+  };
+}
+
+export function rulingFrom(text: string): Ruling {
+  const json = readObject(text);
+  if (!json) {
+    const verdict = plain(text);
+    return {
+      verdict: verdict || "The chair did not file a verdict.",
+      actions: [],
+      dissent: "",
+      openQuestions: [],
+      chairConfidence: verdict ? 40 : 0,
+    };
+  }
+  const verdict = readable(
+    clipField(json.verdict, 600) || clipField(json.answer, 600) || clipField(json.stance, 600) || plain(text),
+  );
+  const dissent = readable(clipField(json.dissent, 300));
+  return {
+    verdict: verdict || "The chair did not file a verdict.",
+    actions: asStrings(json.actions, 3, 180),
+    dissent: /unstructured/i.test(dissent) ? "" : dissent,
+    openQuestions: asStrings(json.openQuestions, 2, 180),
+    chairConfidence: json.chairConfidence != null || json.confidence != null ? asNumber(json.chairConfidence ?? json.confidence) : 40,
   };
 }
 
@@ -575,7 +746,7 @@ export async function runBrowserHearing(opts: {
     if (opts.stopped()) return { stopped: true };
     opts.onStatus(`${seat.name} is writing…`);
     try {
-      const text = await ask(SEAT_SYSTEM[seat.id], matter, 96, opts.onStatus);
+      const text = await ask(SEAT_SYSTEM[seat.id], matter, 80, opts.onStatus, SEAT_CUE);
       const brief = briefFrom(seat.id, text);
       briefs.push(brief);
       opts.onBrief(brief);
@@ -606,8 +777,9 @@ export async function runBrowserHearing(opts: {
         const text = await ask(
           CROSS_SYSTEM[brief.seatId],
           `Your claims: ${brief.claims.join("; ")}\nOthers:\n${peerText}`,
-          100,
+          80,
           opts.onStatus,
+          CROSS_CUE,
         );
         const json = readObject(text);
         const vote = asSeat(json?.vote) ?? brief.seatId;
@@ -649,25 +821,11 @@ export async function runBrowserHearing(opts: {
     const text = await ask(
       CHAIR_SYSTEM,
       `${matter.slice(0, 900)}\n\n${agreement === null ? "Agreement was not measured." : `Agreement ${agreement}%.`}\n${filed}`,
-      96,
+      80,
       opts.onStatus,
+      CHAIR_CUE,
     );
-    const json = readObject(text);
-    ruling = json
-      ? {
-          verdict: clipField(json.verdict, 600) || proseOutside(text) || "The chair did not file a verdict.",
-          actions: asStrings(json.actions, 3, 180),
-          dissent: clipField(json.dissent, 300),
-          openQuestions: asStrings(json.openQuestions, 2, 180),
-          chairConfidence: asNumber(json.chairConfidence),
-        }
-      : {
-          verdict: clip(text, 600) || "The ruling could not be read.",
-          actions: [],
-          dissent: "The ruling was unstructured.",
-          openQuestions: [],
-          chairConfidence: 40,
-        };
+    ruling = rulingFrom(text);
   } catch (error) {
     ruling = {
       verdict: errorText(error),

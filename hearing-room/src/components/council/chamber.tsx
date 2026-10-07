@@ -491,8 +491,10 @@ function SeatCard({
         <p className="mt-4 text-sm text-accent">{brief.error}</p>
       ) : (
         <div className="mt-4 flex flex-1 flex-col gap-3">
-          <p className="font-display text-base text-pretty text-fg italic">{brief.stance}</p>
-          <p className="text-sm text-pretty text-muted">{brief.answer}</p>
+          {brief.stance && brief.stance !== brief.answer ? (
+            <p className="font-display text-base text-pretty text-fg italic">{brief.stance}</p>
+          ) : null}
+          <p className="text-sm text-pretty text-fg">{brief.answer}</p>
           {brief.claims.length > 0 ? (
             <ol className="space-y-1.5 text-sm text-fg">
               {brief.claims.map((claim) => (
@@ -589,17 +591,23 @@ function RulingSheet({
         </ol>
       ) : null}
 
-      <div className="mt-6 border-t border-ink/15 pt-4">
-        <p className="font-mono text-xs tracking-[0.14em] uppercase opacity-70">Dissent kept</p>
-        <p className="mt-2 text-pretty">{ruling.dissent}</p>
-        {ruling.openQuestions.length > 0 ? (
-          <ul className="mt-3 space-y-1 text-sm opacity-80">
-            {ruling.openQuestions.map((question) => (
-              <li key={question}>{question}</li>
-            ))}
-          </ul>
-        ) : null}
-      </div>
+      {ruling.dissent || ruling.openQuestions.length > 0 ? (
+        <div className="mt-6 border-t border-ink/15 pt-4">
+          {ruling.dissent ? (
+            <>
+              <p className="font-mono text-xs tracking-[0.14em] uppercase opacity-70">Dissent kept</p>
+              <p className="mt-2 text-pretty">{ruling.dissent}</p>
+            </>
+          ) : null}
+          {ruling.openQuestions.length > 0 ? (
+            <ul className="mt-3 space-y-1 text-sm opacity-80">
+              {ruling.openQuestions.map((question) => (
+                <li key={question}>{question}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
     </article>
   );
 }
