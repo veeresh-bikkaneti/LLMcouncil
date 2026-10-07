@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Eye, Gavel, HeartPulse, Library, Square } from "lucide-react";
 import { Mascot } from "page-mascot";
-import { crossSeat, gather, rule, sealSeat } from "@/lib/council/hearing";
+import { runBrowserHearing } from "@/lib/council/browserHearing";
 import {
   type Brief,
   type CrossNote,
@@ -11,8 +11,6 @@ import {
   type Ruling,
   type SeatId,
   SEATS,
-  agreementScore,
-  formatPacket,
   linksIn,
   seatById,
   toolLabel,
@@ -122,79 +120,49 @@ export function Chamber() {
     });
 
     try {
-      if (typeof window !== "undefined" && window.location.hostname.endsWith("github.io")) {
-        throw new Error("This GitHub page cannot run the council. Publish the hearing and open that link. Grok runs it. Nothing downloads.");
-      }
-      setLive(openLinks ? "Opening the record…" : "The seats are writing…");
-      const packet = await gather({ data: { question } });
-      if (stopRef.current) {
-        setLive(null);
-        setSession((current) => ({ ...current, phase: "idle" }));
-        return;
-      }
-      setSession((current) => ({ ...current, phase: "sealed", packet }));
-      const record = formatPacket(packet);
-      const briefs: Brief[] = [];
-      for (const seat of SEATS) {
-        if (stopRef.current) {
-          setLive(null);
-          setSession((current) => ({ ...current, phase: "idle" }));
-          return;
-        }
-        setLive(`${seat.name} is writing…`);
-        const brief = await sealSeat({ data: { question, seatId: seat.id, packet: record } });
-        briefs.push(brief);
-        setSession((current) => ({
-          ...current,
-          phase: "sealed",
-          briefs: { ...current.briefs, [brief.seatId]: brief },
-        }));
-      }
-      const usable = briefs.filter((brief) => brief.status === "done");
-      if (usable.length === 0) {
-        throw new Error(briefs[0]?.error ?? "Every seat failed.");
-      }
-      const notes: CrossNote[] = [];
-      if (nextMode === "full") {
-        for (const brief of usable) {
-          if (stopRef.current) {
-            setLive(null);
-            setSession((current) => ({ ...current, phase: "idle" }));
-            return;
+      const result = await runBrowserHearing({
+        question,
+        mode: nextMode,
+        stopped: () => stopRef.current,
+        onStatus: (text) => {
+          setLive(text);
+          if (text.startsWith("The chair")) {
+            setSession((current) => (current.phase === "done" ? current : { ...current, phase: "ruling" }));
           }
-          const seat = seatById(brief.seatId);
-          setLive(`${seat.name} is cross-examining…`);
-          setSession((current) => ({ ...current, phase: "cross" }));
-          const note = await crossSeat({ data: { question, seatId: brief.seatId, briefs } });
-          notes.push(note);
+        },
+        onPacket: (packet) => {
+          setSession((current) => ({ ...current, phase: "sealed", packet }));
+        },
+        onBrief: (brief) => {
+          setSession((current) => ({
+            ...current,
+            phase: current.phase === "cross" || current.phase === "ruling" ? current.phase : "sealed",
+            briefs: { ...current.briefs, [brief.seatId]: brief },
+          }));
+        },
+        onNote: (note) => {
           setSession((current) => ({
             ...current,
             phase: "cross",
             notes: { ...current.notes, [note.seatId]: note },
           }));
-        }
-      }
-      if (stopRef.current) {
+        },
+      });
+      if (result.stopped) {
         setLive(null);
         setSession((current) => ({ ...current, phase: "idle" }));
         return;
       }
-      const agreement = agreementScore(briefs, notes);
-      setLive("The chair is writing the ruling…");
-      setSession((current) => ({ ...current, phase: "ruling" }));
-      const rulingResult = await rule({
-        data: { question, briefs, notes, packet: record, agreement },
-      });
       const docket: Docket = {
         id: `docket-${Date.now()}`,
         at: Date.now(),
         question,
         mode: nextMode,
-        briefs,
-        notes,
-        ruling: rulingResult,
-        agreement,
-        packet,
+        briefs: result.briefs,
+        notes: result.notes,
+        ruling: result.ruling,
+        agreement: result.agreement,
+        packet: result.packet,
       };
       setHistory(saveHistory(docket));
       setLive(null);
@@ -202,11 +170,11 @@ export function Chamber() {
         phase: "done",
         mode: nextMode,
         question,
-        briefs: Object.fromEntries(briefs.map((brief) => [brief.seatId, brief])),
-        notes: Object.fromEntries(notes.map((note) => [note.seatId, note])),
-        ruling: rulingResult,
-        agreement,
-        packet,
+        briefs: Object.fromEntries(result.briefs.map((brief) => [brief.seatId, brief])),
+        notes: Object.fromEntries(result.notes.map((note) => [note.seatId, note])),
+        ruling: result.ruling,
+        agreement: result.agreement,
+        packet: result.packet,
         error: null,
         at: docket.at,
       });
@@ -276,7 +244,7 @@ export function Chamber() {
             <span className="italic">Council</span>
           </h1>
           <p className="mt-4 max-w-lg text-pretty text-lg text-muted">
-            Paste a GitHub link. No key. Grok runs the council.
+            Paste a GitHub link. No key. No account. Free for anyone.
           </p>
           <p className="mt-2 max-w-lg font-mono text-xs tracking-wide text-muted">
             Nothing downloads into this tab.
@@ -313,7 +281,7 @@ export function Chamber() {
                 type="button"
                 disabled={running}
                 onClick={() => setDraft(preset.text)}
-                className="min-h-11 rounded-full border border-line px-3 text-sm text-muted transition hover:border-accent hover:text-fg active:scale-[0.96] disabled:opacity-50"
+                className="min-h-11 rounded-full border border-line px-3 text-sm text-muted transition-[transform,background-color,border-color,color,opacity] duration-150 ease-out hover:border-accent hover:text-fg active:scale-[0.96] disabled:opacity-50"
               >
                 {preset.label}
               </button>
@@ -333,13 +301,13 @@ export function Chamber() {
               type="button"
               disabled={running || draft.trim().length < 8}
               onClick={() => void convene("full")}
-              className="min-h-11 rounded-xl border border-accent px-4 text-base text-fg transition hover:bg-raised active:scale-[0.96] disabled:opacity-50"
+              className="min-h-11 rounded-xl border border-accent px-4 text-base text-fg transition-[transform,background-color,border-color,opacity] duration-150 ease-out hover:bg-raised active:scale-[0.96] disabled:opacity-50"
             >
               Full hearing
             </button>
           </div>
           <p className="mt-3 text-sm text-pretty text-muted">
-            The repo is opened for you. Full hearing adds cross-exam and takes longer. Nothing runs until you press.
+            The repo is opened here. A question without a link is looked up for free. Full hearing adds cross-exam and takes longer. Nothing runs until you press.
           </p>
           {live ? (
             <p className="mt-3 text-sm text-accent" role="status">
@@ -469,7 +437,7 @@ export function Chamber() {
                 <button
                   type="button"
                   onClick={() => openRecord(docket)}
-                  className="min-h-11 max-w-64 rounded-xl border border-line bg-surface px-3 py-2 text-left transition hover:border-accent active:scale-[0.96]"
+                  className="min-h-11 max-w-64 rounded-xl border border-line bg-surface px-3 py-2 text-left transition-[transform,background-color,border-color,opacity] duration-150 ease-out hover:border-accent active:scale-[0.96]"
                 >
                   <p className="truncate text-sm text-fg">{docket.question}</p>
                   <p className="mt-1 font-mono text-xs text-muted tabular-nums">
@@ -513,7 +481,7 @@ function SeatCard({
         <div>
           <p className="font-mono text-xs tracking-[0.16em] text-accent uppercase">{seat.office}</p>
           <h2 className="font-display text-2xl leading-tight font-semibold text-fg">{seat.name}</h2>
-          <p className="mt-1 font-mono text-[10px] tracking-[0.14em] text-muted uppercase">Grok</p>
+          <p className="mt-1 font-mono text-[10px] tracking-[0.14em] text-muted uppercase">In this tab</p>
         </div>
         <Icon className="size-5 text-muted" aria-hidden />
       </div>
